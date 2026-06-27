@@ -12,6 +12,7 @@ to the registry); the config layer itself can't, by the firewall — registratio
 always the composition root's job.
 """
 import sys
+import tomllib
 
 from assetcore.sdk import providers
 from assetcore.sdk.settings import ConfigError, Settings
@@ -29,6 +30,9 @@ def run(path: str = "assetcore.toml") -> int:
         Settings.load(path).validate()
     except FileNotFoundError:
         print(f"[FAIL] config not found: {path}", file=sys.stderr)
+        return 1
+    except tomllib.TOMLDecodeError as err:
+        print(f"[FAIL] {path}: malformed TOML: {err}", file=sys.stderr)
         return 1
     except ConfigError as err:
         print(f"[FAIL] {path}:", file=sys.stderr)

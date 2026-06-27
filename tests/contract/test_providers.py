@@ -323,3 +323,8 @@ def test_validate_config_script_returns_0_and_1(tmp_path, monkeypatch):
     assert validate_config.run(str(bad)) == 1
 
     assert validate_config.run(str(tmp_path / "missing.toml")) == 1
+
+    # malformed TOML must fail cleanly (exit 1), not crash with a traceback
+    broken = tmp_path / "broken.toml"
+    broken.write_text('[repos.main\nprovider = "sqlite"\n')   # unclosed table header
+    assert validate_config.run(str(broken)) == 1
