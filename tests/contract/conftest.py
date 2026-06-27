@@ -6,6 +6,12 @@ AssetcoreClient with a given authority token, all sharing the one app instance s
 state persists across calls within a test.
 """
 import pytest
+
+# the contract suite drives adapters through a live FastAPI stack; without the
+# service extra installed, skip cleanly rather than hard-error at collection (keeps
+# the "runs with zero setup" promise for a bare install).
+pytest.importorskip("fastapi")
+
 from fastapi.testclient import TestClient
 
 from assetcore.infra.broadcast_sink import BroadcastSink
