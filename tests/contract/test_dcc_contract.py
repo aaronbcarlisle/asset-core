@@ -11,6 +11,7 @@ import pytest
 from assetcore.integrations.blender import BlenderAdapter
 from assetcore.integrations.max import MaxAdapter
 from assetcore.integrations.maya import MayaAdapter
+from assetcore.integrations.photoshop import PhotoshopAdapter
 from assetcore.integrations.substance import SubstanceAdapter
 from assetcore.sdk.stamping import StampConflict
 from tests.contract.fakes import (
@@ -37,6 +38,10 @@ DCC_ADAPTERS = [
     # the SAME contract unchanged — the weekend-adapter thesis, demonstrated.
     pytest.param(lambda mk, tmp: MaxAdapter(mk("artist-token"), scene=FakeMayaScene(),
                                             vcs=FakeMayaVcs()), id="max"),
+    # Concept art (front of the pipeline) authored in Photoshop — same seam shape,
+    # same contract. The .psd XMP stamp is the only tool-specific difference.
+    pytest.param(lambda mk, tmp: PhotoshopAdapter(mk("artist-token"), doc=FakeMayaScene(),
+                                                  vcs=FakeMayaVcs()), id="photoshop"),
     pytest.param(lambda mk, tmp: BlenderAdapter(mk("artist-token"), scene=FakeBlenderScene(),
                                                 vcs=FakeBlenderVcs()), id="blender"),
     pytest.param(lambda mk, tmp: SubstanceAdapter(mk("artist-token"), package=FakeSubstancePackage(),
