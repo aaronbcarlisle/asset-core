@@ -252,16 +252,18 @@ def run(args, client: AssetcoreClient) -> int:
             _out(args, {"source": uri}, uri)
     elif cmd == "subscribe":
         url, token = getattr(args, "url", DEFAULT_URL), getattr(args, "token", DEFAULT_TOKEN)
+        if args.limit is not None and args.limit <= 0:
+            return 0                                   # --limit 0 -> nothing to tail
         n = 0
         for ev in automation.stream_events(url, token, args.after_seq):
-            if args.limit is not None and n >= args.limit:   # is not None: honor --limit 0
-                break
             if getattr(args, "json", False):
                 print(_json.dumps(ev))
             else:
                 print(f"  [{ev.get('seq')}] {ev.get('event_type', ''):<22} "
                       f"{ev.get('asset_id')}  {ev.get('payload')}")
             n += 1
+            if args.limit is not None and n >= args.limit:   # break after Nth printed — no extra pull
+                break
     else:   # pragma: no cover - argparse 'required' prevents this
         return 2
     return 0

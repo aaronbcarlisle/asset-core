@@ -12,6 +12,7 @@ covers this module). Studios write handlers; the core never learns the recipe.
 from __future__ import annotations
 
 import json
+import sys
 from typing import Callable, Iterable, Iterator
 
 import httpx
@@ -42,18 +43,22 @@ class EventRouter:
             try:
                 fn(event)
             except Exception as exc:   # noqa: BLE001 — one bad recipe must not sink the stream
-                print(f"[automation] handler error on {event.get('event_type')}: {exc}")
+                # to stderr so it never corrupts machine-readable stdout (e.g. --json)
+                print(f"[automation] handler error on {event.get('event_type')}: {exc}",
+                      file=sys.stderr)
         return len(fns)
 
     def run(self, events: Iterable[Event], limit: int | None = None) -> int:
         """Dispatch a stream of events (e.g. stream_events(...)). `limit` stops after
         N events (handy for tests / bounded runs). Returns events processed."""
+        if limit is not None and limit <= 0:
+            return 0                               # limit 0 -> process nothing, pull nothing
         n = 0
         for ev in events:
-            if limit is not None and n >= limit:   # check before dispatch so limit=0 means zero
-                break
             self.dispatch(ev)
             n += 1
+            if limit is not None and n >= limit:   # break right after the Nth — no extra pull
+                break
         return n
 
 
