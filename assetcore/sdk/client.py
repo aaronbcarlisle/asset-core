@@ -20,7 +20,20 @@ class AssetcoreClient:
     def __init__(self, token: str, base_url: str = "http://127.0.0.1:8000",
                  http: httpx.Client | None = None) -> None:
         self.token = token
+        # own (and therefore close) the client only when we created it; an injected
+        # client (e.g. a TestClient) is the caller's to manage.
+        self._owns_http = http is None
         self._http = http if http is not None else httpx.Client(base_url=base_url)
+
+    def close(self) -> None:
+        if self._owns_http:
+            self._http.close()
+
+    def __enter__(self) -> "AssetcoreClient":
+        return self
+
+    def __exit__(self, *exc) -> None:
+        self.close()
 
     @property
     def _headers(self) -> dict[str, str]:

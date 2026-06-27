@@ -43,7 +43,9 @@ class SidecarStampMixin:
 
     def read_stamp(self, doc) -> str | None:
         sc = self._sidecar(doc)
-        return sc.read_text().strip() if sc.exists() else None
+        if not sc.exists():
+            return None
+        return sc.read_text().strip() or None   # a blank sidecar means "unstamped", not ""
 
     def _set_stamp(self, doc, asset_id: str) -> None:
         self._sidecar(doc).write_text(str(asset_id))
