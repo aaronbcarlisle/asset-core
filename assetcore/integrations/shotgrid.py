@@ -30,8 +30,13 @@ class _RealShotGridSite:
         import shotgun_api3  # noqa: PLC0415 — lazy; absent without the SG client
         self._sg = shotgun_api3.Shotgun(base_url, script_name=script_name, api_key=api_key)
 
+    # map identity fields -> ShotGrid columns; only non-None ones are written, so a
+    # mirror never clears a column the core didn't set.
+    _FIELD_MAP = {"display_name": "code", "taxonomy": "sg_taxonomy", "status": "sg_status_list"}
+
     def upsert(self, asset_id: str, fields: dict) -> None:
-        data = {"code": fields.get("display_name"), "sg_status_list": fields.get("status")}
+        data = {col: fields[key] for key, col in self._FIELD_MAP.items()
+                if fields.get(key) is not None}
         existing = self._sg.find_one(self.ENTITY, [[self.UUID_FIELD, "is", asset_id]])
         if existing:
             self._sg.update(self.ENTITY, existing["id"], data)
@@ -41,6 +46,8 @@ class _RealShotGridSite:
     def get(self, external_id: str) -> dict:
         rec = self._sg.find_one(self.ENTITY, [["id", "is", int(external_id)]],
                                 ["code", "sg_taxonomy", self.UUID_FIELD])
+        if rec is None:
+            raise KeyError(f"no ShotGrid {self.ENTITY} with id {external_id}")
         return {"display_name": rec["code"], "taxonomy": rec.get("sg_taxonomy"),
                 "asset_id": rec.get(self.UUID_FIELD)}
 

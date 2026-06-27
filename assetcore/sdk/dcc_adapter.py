@@ -52,6 +52,12 @@ class DCCAdapter(ABC):
         """
         asset_id = self.read_stamp(doc)
         if asset_id is None:
+            # mint-then-stamp is not atomic across the service + the tool: if
+            # write_stamp dies after declare, the doc stays unstamped and a retry
+            # mints a second identity. That orphan is recoverable (it surfaces in
+            # the provisional backfill worklist and find_similar flags the dup),
+            # which is why we accept it here rather than add a declare idempotency
+            # key. See PR #4 review thread.
             asset_id = self.client.declare(asset_type, artist)
             self.write_stamp(doc, asset_id)
         self.client.bind_source(asset_id, self.current_location(doc), self.tool,
