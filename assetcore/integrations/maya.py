@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import subprocess
+import tempfile
 from typing import Protocol
 
 from assetcore.sdk.dcc_adapter import DCCAdapter
@@ -39,13 +40,17 @@ class _RealMayaScene:
     def __init__(self) -> None:
         from maya import cmds  # noqa: PLC0415 — must be lazy; absent outside Maya
         self._cmds = cmds
+        self._current: str | None = None
 
     def open_or_new(self, path: str) -> None:
+        if path == self._current:
+            return   # already the open scene — don't reload and lose in-memory fileInfo
         if os.path.exists(path):
             self._cmds.file(path, open=True, force=True)
         else:
             self._cmds.file(new=True, force=True)
             self._cmds.file(rename=path)
+        self._current = path
 
     def file_info_get(self, key: str) -> str | None:
         vals = self._cmds.fileInfo(key, query=True)
@@ -61,7 +66,10 @@ class _RealMayaVcs:
     def depot_path(self, local_path: str) -> str:
         out = subprocess.run(["p4", "-F", "%depotFile%", "where", local_path],
                              capture_output=True, text=True, check=True).stdout.strip()
-        return out.splitlines()[0] if out else local_path
+        if not out:   # don't silently fall back to a local path that routes to the wrong resolver
+            raise RuntimeError(
+                f"p4 where returned nothing for {local_path!r}; is it under a P4 workspace?")
+        return out.splitlines()[0]
 
     def revision(self, local_path: str) -> str:
         out = subprocess.run(["p4", "-F", "%change%", "changes", "-m1", local_path],
@@ -83,7 +91,7 @@ class MayaAdapter(DCCAdapter):
     def new_doc(self) -> str:
         """Start a fresh scene (batch-style) and return its path."""
         self._n += 1
-        path = f"/work/scene_{self._n}.ma"
+        path = os.path.join(tempfile.gettempdir(), f"assetcore_scene_{self._n}.ma")
         self._scene.open_or_new(path)
         return path
 
