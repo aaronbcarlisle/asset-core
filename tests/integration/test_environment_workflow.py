@@ -140,8 +140,9 @@ def test_environment_workflow(backend):
     assert len(stale) == 1 and stale[0].to_asset == w["sculpt"]
 
     # --- deprecate: retire a prop without losing its facets or its consumers ----
-    old = w["props"][PROPS - 1]
+    old = w["props"][5]                                       # a prop a district composes
     consumers_before = {e.from_asset for e in verbs.used_by(repo, old)}
+    assert consumers_before, "precondition: the retired prop must have consumers to prove they survive"
     verbs.deprecate(repo, sink, old, "prod:pat")
     assert repo.get_asset(old).lifecycle == Lifecycle.DEPRECATED
     assert verbs.resolve(repo, old)["source"] is not None                                    # facets kept
