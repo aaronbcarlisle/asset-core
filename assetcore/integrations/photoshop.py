@@ -61,6 +61,7 @@ _JSX_GET = """
 (function(key) {
   if (ExternalObject.AdobeXMPScript == undefined)
     ExternalObject.AdobeXMPScript = new ExternalObject("lib:AdobeXMPScript");
+  XMPMeta.registerNamespace(%(ns)s, "assetcore");
   var xmp = new XMPMeta(activeDocument.xmpMetadata.rawData);
   var p = xmp.getProperty(%(ns)s, key);
   return p ? String(p) : "";
