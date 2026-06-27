@@ -253,6 +253,7 @@ def test_validate_flags_unset_env_ref_in_required_key(monkeypatch):
             [trackers.production.config]
             base_url = "https://x"
             script_name = "assetcore"
+            project = "Demo: Game"
             api_key = "${TEST_MISSING_SECRET}"
         """).validate(["tracker"])
     assert "TEST_MISSING_SECRET" in str(exc.value)

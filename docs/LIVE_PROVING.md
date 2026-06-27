@@ -75,6 +75,51 @@ facet for every stamped asset), and verifies `resolve()` reflects it. The editor
 own log (the verbose one) is `<project>/Saved/Logs/<Project>.log`; grep it for
 `LIVE_UNREAL_RESULT:` and the `[live-unreal]` lines for the outcome.
 
-## 3ds Max, ShotGrid
+## ShotGrid (Flow Production Tracking) -> assetcore (identity facet, both ways)
 
-(added as each is proven)
+The tracker is a VIEW over the identity facet. The driver runs in a normal python
+(it has `httpx` + FastAPI); `shotgun_api3` is installed beside the repo in
+`sg-deps/` and added to `sys.path`.
+
+One-time site setup:
+- a **Script** (API User) with an **Application Key** (Admin Center -> Scripts ->
+  "Change Key" reveals it). Use the *script's* Application Key, NOT a Personal
+  Access Token (that's a different, user-based mechanism).
+- the script's **Permission Group = API Admin** (so it can create Assets, and —
+  optionally — create fields via the API).
+- two custom **Text** fields on the `Asset` entity: `sg_assetcore_uuid`,
+  `sg_taxonomy` (an API-Admin script can create these in code via
+  `schema_field_create`; otherwise add them in the Assets grid UI).
+
+Secrets live in a gitignored `sg.env` (see `sg.env.example`):
+
+```bash
+# sg.env (gitignored) — single-quote the key (it may contain shell-special chars)
+export SHOTGRID_URL=https://<site>.shotgrid.autodesk.com
+export SHOTGRID_SCRIPT=<exact script name>     # case-sensitive!
+export SHOTGRID_API_KEY='<the script Application Key>'
+export SHOTGRID_PROJECT='Demo: Game'           # SG Assets are project-scoped (id or name)
+```
+
+Then (with the service up). Note `source sg.env` can choke if the key has shell-
+special chars; loading it in python is safer:
+
+```bash
+python - <<'PY'
+import re, os, runpy
+for l in open('sg.env'):
+    l=l.strip()
+    if l and not l.startswith('#'):
+        l=re.sub(r'^export\s+','',l); k,_,v=l.partition('='); os.environ[k.strip()]=v.strip().strip('"').strip("'")
+runpy.run_path('scripts/live_shotgrid_mirror.py', run_name='__main__')
+PY
+```
+
+`scripts/live_shotgrid_mirror.py` does declare+claim -> `mirror()` (creates a real
+SG Asset in the target project) -> simulates a production rename in SG -> `apply()`
+(pulled back as an identity rename) -> `resolve()` confirms -> deletes the test
+Asset. Look for `[live-sg] PASS`.
+
+## 3ds Max
+
+(added when proven)

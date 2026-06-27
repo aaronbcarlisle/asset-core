@@ -25,6 +25,7 @@ provider = "shotgrid"               # which TrackerAdapter implementation
 base_url    = "https://studio.shotgrid.autodesk.com"
 script_name = "assetcore"
 api_key     = "${SHOTGRID_API_KEY}"
+project     = "Demo: Game"          # SG Assets are project-scoped (id or name)
 
 # to move to Jira, this whole block becomes:
 #   [trackers.production]
