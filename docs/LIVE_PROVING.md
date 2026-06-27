@@ -143,3 +143,25 @@ changelist. `3dsmaxbatch` doesn't surface python stdout, so the outcome is writt
 to `%TEMP%/assetcore_max_result.txt` (read that for PASS/FAIL + the step log).
 Config via the same env as the Maya driver, with `ASSETCORE_DEPS` defaulting to
 `<repo-parent>/max-deps`.
+
+## Cross-tool E2E — one barrel, one identity, three facets
+
+The capstone: `scripts/live_e2e.py` (normal python, service up) drives ONE barrel
+across two real tool runtimes and shows all three facets resolve to a single UUID,
+each written by its own authority:
+
+```bash
+python scripts/live_e2e.py
+```
+
+- **artist / Maya** (mayapy): publish -> mints the identity, binds the SOURCE facet
+  to the live P4 depot path; emits the asset id to a handoff file.
+- **production**: `claim` -> the IDENTITY facet (display name + taxonomy).
+- **engine / Unreal** (UnrealEditor-Cmd): carries the SAME id forward — stamps it
+  onto a `/Game` asset and binds the RUNTIME facet (never mints a second identity).
+- `resolve(aid)` -> identity + source(Maya/P4) + runtime(Unreal) on one UUID.
+
+The orchestrator sequences the two headless tool processes and threads the minted
+id between them (Maya can't talk to Unreal; the *core* is the only shared spine).
+Per-tool deps are the Maya + Unreal sections above; config via `MAYAPY`, `UE_CMD`,
+`UE_PROJECT`, `MAYA_DEPS`, `UE_DEPS`.
