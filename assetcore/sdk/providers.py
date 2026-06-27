@@ -51,7 +51,8 @@ def build(capability: str, name: str, config: dict, **injected):
                 "modules, e.g. assetcore.infra._providers / "
                 "assetcore.integrations._register?)")
         raise KeyError(
-            f"no provider {name!r} for capability {capability!r}; available: {hint}")
+            f"no provider {name!r} for capability {capability!r}; available: {hint}"
+        ) from None   # the bare KeyError adds nothing; the message above is the error
     return entry["factory"](config=config, **injected)
 
 

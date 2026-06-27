@@ -90,7 +90,8 @@ class Settings:
         except KeyError:
             raise KeyError(
                 f"no [{section}.{instance}] block in config; "
-                f"have {section}: {sorted(self._config.get(section, {}))}")
+                f"have {section}: {sorted(self._config.get(section, {}))}"
+            ) from None   # the bare KeyError adds nothing; the message above is the error
         capability = _SECTIONS[section]
         cfg = _expand(block.get("config", {}))
         # trackers operate against the running service, so they need the client;
