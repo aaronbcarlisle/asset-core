@@ -55,8 +55,14 @@ class InMemoryRepo:
     def set_lifecycle(self, asset_id: UUID, lifecycle: Lifecycle) -> None:
         self.assets[asset_id].lifecycle = lifecycle
 
+    def _require_asset(self, asset_id: UUID) -> None:
+        # mirror the SQL schema's foreign keys, so misuse surfaces here too
+        if asset_id not in self.assets:
+            raise ValueError(f"unknown asset {asset_id}")
+
     # --- source facet ---
     def add_source_version(self, v: SourceVersion) -> None:
+        self._require_asset(v.asset_id)
         # enforce one_latest_source: demote the prior latest as part of the write
         demote_latest(self.source_versions(v.asset_id))
         self.sources.append(v)
@@ -70,6 +76,7 @@ class InMemoryRepo:
 
     # --- runtime facet ---
     def add_runtime_version(self, v: RuntimeVersion) -> None:
+        self._require_asset(v.asset_id)
         demote_latest(self.runtime_versions(v.asset_id))
         self.runtimes.append(v)
 
@@ -81,6 +88,8 @@ class InMemoryRepo:
 
     # --- relationships ---
     def add_relationship(self, r: Relationship) -> None:
+        self._require_asset(r.from_asset)
+        self._require_asset(r.to_asset)
         # honor the schema's UNIQUE(from, to, rel_type): relate asserts a NEW edge.
         # Flipping an existing edge is set_binding's job (upsert_relationship).
         if self.get_edge(r.from_asset, r.to_asset, r.rel_type) is not None:

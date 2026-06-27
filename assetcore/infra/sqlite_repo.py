@@ -211,7 +211,10 @@ class SqliteRepo:
                     self._rel_params(r),
                 )
         except sqlite3.IntegrityError as exc:
-            # honor UNIQUE(from,to,rel_type): relate asserts a NEW edge (set_binding flips)
+            # only the UNIQUE(from,to,rel_type) violation means "edge already exists";
+            # re-raise FK / other integrity errors so real data bugs aren't masked.
+            if "unique" not in str(exc).lower():
+                raise
             raise ValueError(
                 f"edge already exists: {r.from_asset}-{r.rel_type.value}->{r.to_asset}"
             ) from exc

@@ -33,14 +33,27 @@ class _RealSubstancePackage:
         import sd  # noqa: PLC0415 — must be lazy; absent outside Substance
         self._sd = sd
         self._ctx = sd.getContext()
+        self._pkg = None          # the package opened for the current path
+        self._current: str | None = None
+
+    def _mgr(self):
+        return self._ctx.getSDApplication().getPackageMgr()
 
     def _current_package(self):
-        app = self._ctx.getSDApplication()
-        return app.getPackageMgr().getUserPackages()[-1]
+        if self._pkg is None:
+            raise RuntimeError("no Substance package open; call open_or_new(path) first")
+        return self._pkg
 
     def open_or_new(self, path: str) -> None:
-        mgr = self._ctx.getSDApplication().getPackageMgr()
-        mgr.loadUserPackage(path) if _exists(path) else mgr.newUserPackage()
+        if path == self._current and self._pkg is not None:
+            return
+        mgr = self._mgr()
+        if _exists(path):
+            self._pkg = mgr.loadUserPackage(path)
+        else:
+            self._pkg = mgr.newUserPackage()
+            mgr.savePackageAs(self._pkg, path)   # persist so later reads open THIS package
+        self._current = path
 
     def metadata_get(self, key: str) -> str | None:
         md = self._current_package().getMetadataDict()
@@ -51,6 +64,7 @@ class _RealSubstancePackage:
         from sd.api.sdvaluestring import SDValueString
         self._current_package().getMetadataDict().setPropertyValueFromId(
             key, SDValueString.sNew(value))
+        self._mgr().savePackage(self._current_package())   # persist the stamp to disk
 
 
 def _exists(path: str) -> bool:

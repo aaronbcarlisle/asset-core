@@ -89,8 +89,9 @@ state — never build for weeks without something to smoke-test.
 
 ## Phase 6 — The swap test (proof of decoupling)  ✅
 - [x] `integrations/blender.py`, `integrations/substance.py` — **core untouched**:
-      the only production code added was two L4 files (192 lines); `git diff` vs
-      Phase 5 shows ZERO changes under core/app/infra/service/sdk.
+      the only *production* code added was two L4 files (192 lines); `git diff` vs
+      Phase 5 shows ZERO changes under core/app/infra/service/sdk. (Tests and this
+      roadmap changed too — the invariant is about production layers, not the diff.)
 - [x] Blender **and** Substance pass the identical DCC contract suite (now run
       across 5 DCC adapters: dict, sidecar, maya, blender, substance).
 - [x] Cross-tool flow (tests/contract/test_swap_crosstool.py): a Blender barrel, a

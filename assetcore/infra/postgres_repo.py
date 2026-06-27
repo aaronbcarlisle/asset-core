@@ -25,9 +25,12 @@ from assetcore.core.types import BindingMode, Lifecycle, RelType
 
 _SCHEMA_PATH = pathlib.Path(__file__).parent / "schema.sql"
 # We always supply ids explicitly, so the pgcrypto extension is unnecessary
-# (and may need privileges we don't have). Strip it from the bootstrap DDL.
+# (and may need privileges we don't have). Strip it from the bootstrap DDL — and
+# with it the gen_random_uuid() column default, which would otherwise make
+# CREATE TABLE fail on a server without pgcrypto.
 _BOOTSTRAP_DDL = re.sub(
     r"CREATE EXTENSION.*?;", "", _SCHEMA_PATH.read_text(), flags=re.S)
+_BOOTSTRAP_DDL = _BOOTSTRAP_DDL.replace(" DEFAULT gen_random_uuid()", "")
 
 _TABLES = (
     "event", "relationship", "facet_runtime_version",
@@ -186,6 +189,10 @@ class PostgresRepo:
                     self._rel_params(r),
                 )
         except self._psycopg2.IntegrityError as exc:
+            # 23505 = unique_violation -> "edge already exists"; re-raise FK / other
+            # integrity errors so real data bugs aren't masked.
+            if getattr(exc, "pgcode", None) != "23505":
+                raise
             raise ValueError(
                 f"edge already exists: {r.from_asset}-{r.rel_type.value}->{r.to_asset}"
             ) from exc
