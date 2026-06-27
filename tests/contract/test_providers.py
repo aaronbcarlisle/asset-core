@@ -9,8 +9,12 @@ import textwrap
 
 import pytest
 
+# importing these runs the @providers.register side-effects, so the real provider
+# names (shotgrid/jira, sqlite/postgres/memory) exist for the validation tests.
+import assetcore.infra._providers      # noqa: F401
+import assetcore.integrations._register  # noqa: F401
 from assetcore.sdk import providers
-from assetcore.sdk.settings import Settings
+from assetcore.sdk.settings import ConfigError, Settings
 
 
 # --- two fake tracker providers, self-registering under distinct names so they
@@ -206,3 +210,121 @@ def test_tracker_stays_a_view():
     assert hasattr(adapter, "push_identity") and hasattr(adapter, "pull_identity")
     for forbidden in ("bind_source", "bind_runtime", "relate", "set_binding"):
         assert not hasattr(adapter, forbidden), f"tracker must not expose {forbidden}"
+
+
+# --- config validation (Phase 10) -------------------------------------------
+def test_validate_accepts_a_good_config():
+    _load("""
+        [repos.main]
+        provider = "sqlite"
+        [repos.main.config]
+        path = ""
+    """).validate(["repo"])   # no raise
+
+
+def test_validate_flags_unknown_provider():
+    with pytest.raises(ConfigError) as exc:
+        _load("""
+            [repos.main]
+            provider = "mysql"
+        """).validate(["repo"])
+    msg = str(exc.value)
+    assert "mysql" in msg and "sqlite" in msg   # names the bad one + lists available
+
+
+def test_validate_flags_missing_required_key():
+    # postgres requires "dsn"
+    with pytest.raises(ConfigError) as exc:
+        _load("""
+            [repos.main]
+            provider = "postgres"
+            [repos.main.config]
+            host = "db"
+        """).validate(["repo"])
+    assert "dsn" in str(exc.value)
+
+
+def test_validate_flags_unset_env_ref_in_required_key(monkeypatch):
+    monkeypatch.delenv("TEST_MISSING_SECRET", raising=False)
+    with pytest.raises(ConfigError) as exc:
+        _load("""
+            [trackers.production]
+            provider = "shotgrid"
+            [trackers.production.config]
+            base_url = "https://x"
+            script_name = "assetcore"
+            api_key = "${TEST_MISSING_SECRET}"
+        """).validate(["tracker"])
+    assert "TEST_MISSING_SECRET" in str(exc.value)
+
+
+def test_validate_allows_empty_env_ref_in_optional_key(monkeypatch):
+    # sqlite "path" is optional (-> :memory:), so an unset env ref must NOT raise
+    monkeypatch.delenv("TEST_MISSING_PATH", raising=False)
+    _load("""
+        [repos.main]
+        provider = "sqlite"
+        [repos.main.config]
+        path = "${TEST_MISSING_PATH}"
+    """).validate(["repo"])   # no raise
+
+
+def test_validate_flags_unknown_section():
+    with pytest.raises(ConfigError) as exc:
+        _load("""
+            [reposss.main]
+            provider = "sqlite"
+        """).validate(["repo"])
+    assert "reposss" in str(exc.value)
+
+
+def test_validate_flags_missing_provider_key():
+    with pytest.raises(ConfigError) as exc:
+        _load("""
+            [repos.main]
+            [repos.main.config]
+            path = "x"
+        """).validate(["repo"])
+    assert "provider" in str(exc.value)
+
+
+def test_validate_capabilities_filter_scopes_checks():
+    settings = _load("""
+        [repos.main]
+        provider = "sqlite"
+        [trackers.production]
+        provider = "does_not_exist"
+    """)
+    settings.validate(["repo"])          # tracker problem ignored -> no raise
+    with pytest.raises(ConfigError):
+        settings.validate(["tracker"])   # now the bad tracker is in scope
+
+
+def test_validate_aggregates_all_problems():
+    with pytest.raises(ConfigError) as exc:
+        _load("""
+            [repos.main]
+            provider = "mysql"
+            [repos.other]
+            provider = "postgres"
+        """).validate(["repo"])
+    assert len(exc.value.problems) >= 2   # both the unknown provider AND missing dsn
+
+
+def test_validate_config_script_returns_0_and_1(tmp_path, monkeypatch):
+    from scripts import validate_config
+
+    good = tmp_path / "good.toml"
+    good.write_text('[repos.main]\nprovider = "sqlite"\n[repos.main.config]\npath = ""\n')
+    assert validate_config.run(str(good)) == 0
+
+    bad = tmp_path / "bad.toml"
+    bad.write_text('[repos.main]\nprovider = "nope"\n')
+    assert validate_config.run(str(bad)) == 1
+
+    assert validate_config.run(str(tmp_path / "missing.toml")) == 1
+
+    # malformed TOML must fail cleanly (exit 1), not crash with a traceback
+    broken = tmp_path / "broken.toml"
+    broken.write_text('[repos.main\nprovider = "sqlite"\n')   # unclosed table header
+    assert validate_config.run(str(broken)) == 1

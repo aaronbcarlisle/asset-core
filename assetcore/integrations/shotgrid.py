@@ -65,7 +65,7 @@ class ShotGridAdapter(TrackerAdapter):
         return self._site.get(external_id)
 
 
-@providers.register("tracker", "shotgrid")
+@providers.register("tracker", "shotgrid", requires=["base_url", "script_name", "api_key"])
 def _build_shotgrid(config, client):
     site = _RealShotGridSite(
         base_url=config["base_url"],
