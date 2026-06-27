@@ -51,8 +51,12 @@ def health() -> dict:
 
 
 @router.get("/metrics")
-def metrics(request: Request, service: AssetcoreService = Depends(get_service)) -> dict:
-    """Operational health: lifecycle mix, facet coverage, provisional age, latency."""
+async def metrics(request: Request, service: AssetcoreService = Depends(get_service)) -> dict:
+    """Operational health: lifecycle mix, facet coverage, provisional age, latency.
+
+    async so it reads app.state.latency on the event loop, not a threadpool worker
+    racing the latency middleware.
+    """
     data = service.metrics(datetime.now(timezone.utc))
     lat = request.app.state.latency
     data["events_emitted"] = getattr(request.app.state.sink, "last_seq", 0)

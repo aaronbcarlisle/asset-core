@@ -4,10 +4,17 @@ The swap-in for BroadcastSink when Postgres is the live target (deferred here
 since Phase 3). emit() appends to the durable `event` table AND issues a NOTIFY;
 the table is the source of truth (catch-up replays from it), NOTIFY is the
 low-latency hint (ARCHITECTURE Part 5 / 7.2). Same EventSink port as the in-process
-sink — the service swaps one for the other with no change above.
+sink — the *emit* side swaps with no change above.
 
-Code-complete but exercised only with a live Postgres (psycopg2 is imported
-lazily); no server is available in this environment, so it is not run here.
+Scope note: this implements the EventSink port (emit) + a durable history(), not
+the BroadcastSink subscribe/unsubscribe streaming API. So a NotifySink alone does
+NOT power the /events SSE endpoint — that needs a small LISTEN->queue bridge
+process; the /events route degrades cleanly (501) if given a non-subscribable
+sink. Until that bridge lands, run BroadcastSink for live SSE and NotifySink for
+the durable cross-process log.
+
+Exercised only with a live Postgres (psycopg2 imported lazily); covered by the
+gated tests/integration/test_postgres_notify.py when ASSETCORE_TEST_DSN is set.
 """
 from __future__ import annotations
 
@@ -23,6 +30,8 @@ class NotifySink:
 
     def __init__(self, dsn: str) -> None:
         import psycopg2
+        import psycopg2.extras
+        psycopg2.extras.register_uuid()      # so a UUID asset_id adapts in the INSERT
         self.conn = psycopg2.connect(dsn)
         self.conn.autocommit = True
 

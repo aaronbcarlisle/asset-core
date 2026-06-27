@@ -44,6 +44,12 @@ def stamp_coverage(adapter) -> dict:
 
 
 def stamp_coverage_gate(adapter, threshold: float = 100.0) -> tuple[bool, dict]:
-    """(passes, report). passes is False when coverage is below threshold."""
+    """(passes, report). passes is False when coverage is below threshold.
+
+    Compares the RAW ratio, not the display-rounded coverage_pct: 99.95% rounds to
+    100.0 but must not pass a 100% gate while unstamped assets remain.
+    """
     report = stamp_coverage(adapter)
-    return report["coverage_pct"] >= threshold, report
+    total = report["total"]
+    raw_pct = 100.0 if total == 0 else 100.0 * report["stamped"] / total
+    return raw_pct >= threshold, report

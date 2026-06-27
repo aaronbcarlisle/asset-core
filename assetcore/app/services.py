@@ -72,6 +72,10 @@ class AssetcoreService:
         return verbs.floating_dependencies(self.repo, asset_id)
 
     def metrics(self, now: datetime) -> dict:
+        # NOTE: per-asset source/runtime lookups are O(n) round-trips on SQL
+        # backends. Acceptable for now (scrape interval >> asset churn); a
+        # repo-level COUNT(*)...GROUP BY coverage query is the future optimization
+        # if /metrics scraping ever dominates load (PR #8 review thread).
         assets = self.repo.list_assets()
         total = len(assets)
         with_source = sum(1 for a in assets

@@ -68,8 +68,13 @@ raise SystemExit(run(adapter, threshold=100.0))   # non-zero exit fails the buil
 - The durable log is the source of truth; the live push (SSE / Postgres NOTIFY) is
   the low-latency hint. A dropped SSE connection resumes by sending the last seq it
   saw as the `Last-Event-ID` header — the server replays the gap, then follows.
-- In production swap `BroadcastSink` for `infra/notify_sink.NotifySink` (Postgres
-  LISTEN/NOTIFY). Same `EventSink` port; no change above L1.
+- In production, `infra/notify_sink.NotifySink` is the `EventSink` for the *emit*
+  side (durable `event` table + Postgres NOTIFY) — a clean swap for BroadcastSink's
+  emit. It does **not** implement the subscribe/stream API, so it does not by
+  itself power the `/events` SSE endpoint: that needs a small LISTEN→queue bridge
+  process (or keep BroadcastSink for live SSE and NotifySink for the durable
+  cross-process log). `/events` returns 501 if handed a non-subscribable sink, so
+  the degradation is explicit rather than a runtime break.
 
 ## Backup / restore of the binding DB
 
