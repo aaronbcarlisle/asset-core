@@ -36,14 +36,18 @@ class NotifySink:
             "occurred_at": event.occurred_at.isoformat(),
         }
         with self.conn.cursor() as cur:
+            # The table's `id` is a BIGSERIAL sequence (the catch-up cursor) — let
+            # it autogenerate. Event.id (a UUID, the live-delivery dedupe key) rides
+            # in the NOTIFY envelope, not the serial PK.
             cur.execute(
-                "INSERT INTO event (id, asset_id, event_type, payload, actor, occurred_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s)",
-                (event.id, event.asset_id, event.event_type, json.dumps(event.payload),
+                "INSERT INTO event (asset_id, event_type, payload, actor, occurred_at)"
+                " VALUES (%s, %s, %s, %s, %s) RETURNING id",
+                (event.asset_id, event.event_type, json.dumps(event.payload),
                  event.actor, event.occurred_at),
             )
+            payload["seq"] = cur.fetchone()[0]
             # NOTIFY carries the low-latency hint; subscribers dedupe on event_id
-            # and catch up from the event table on (re)connect.
+            # and catch up from the event table by seq on (re)connect.
             cur.execute(f"NOTIFY {CHANNEL}, %s", (json.dumps(payload),))
 
     def history(self, after_seq: int = 0) -> list[tuple[int, dict]]:
