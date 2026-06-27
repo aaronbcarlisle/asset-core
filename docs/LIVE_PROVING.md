@@ -34,11 +34,14 @@ Depot `//depot`, workspace `assetcore_ws` -> `p4local/ws`.
 ## Maya 2027 -> Perforce
 
 `mayapy` needs `httpx` (the client) and `p4` on PATH; the service runs in a normal
-python (it has FastAPI). `httpx` is installed into an isolated `maya-deps/` dir the
-driver adds to `sys.path`:
+python (it has FastAPI). `httpx` is installed into an isolated `maya-deps/` dir
+*beside* the repo (not inside it, so it never pollutes git) — this matches the
+driver's `ASSETCORE_DEPS` default (`<repo-parent>/maya-deps`); override the env var
+to install elsewhere.
 
 ```bash
-"/c/Program Files/Autodesk/Maya2027/bin/mayapy.exe" -m pip install --target maya-deps httpx
+# run from the repo root; ../maya-deps == the driver's default ASSETCORE_DEPS
+"/c/Program Files/Autodesk/Maya2027/bin/mayapy.exe" -m pip install --target ../maya-deps httpx
 # with the service running:
 "/c/Program Files/Autodesk/Maya2027/bin/mayapy.exe" scripts/live_maya_publish.py
 ```
