@@ -157,8 +157,8 @@ async def lineage(asset_id: UUID, service: AssetcoreService = Depends(get_servic
 
 # --- human surfaces (Phase 7) ----------------------------------------------
 @router.get("/similar", response_model=list[SimilarCandidate])
-def find_similar(name: str, asset_type: str | None = None,
-                 service: AssetcoreService = Depends(get_service)) -> list[SimilarCandidate]:
+async def find_similar(name: str, asset_type: str | None = None,
+                       service: AssetcoreService = Depends(get_service)) -> list[SimilarCandidate]:
     """Reuse-over-rebuild nudge: existing assets like `name` (advisory only)."""
     return [
         SimilarCandidate(
@@ -171,7 +171,7 @@ def find_similar(name: str, asset_type: str | None = None,
 
 
 @router.get("/worklist/provisional", response_model=list[WorklistItem])
-def backfill_worklist(service: AssetcoreService = Depends(get_service)) -> list[WorklistItem]:
+async def backfill_worklist(service: AssetcoreService = Depends(get_service)) -> list[WorklistItem]:
     """The provisional backfill queue Production grooms (oldest first)."""
     return [
         WorklistItem(
@@ -184,8 +184,8 @@ def backfill_worklist(service: AssetcoreService = Depends(get_service)) -> list[
 
 
 @router.get("/assets/{asset_id}/floating-dependencies", response_model=list[RelationshipOut])
-def floating_dependencies(asset_id: UUID,
-                          service: AssetcoreService = Depends(get_service)) -> list[RelationshipOut]:
+async def floating_dependencies(asset_id: UUID,
+                                service: AssetcoreService = Depends(get_service)) -> list[RelationshipOut]:
     """The float-footgun guard: DEPENDS_ON edges still floating before delivery."""
     return [RelationshipOut.model_validate(r) for r in service.floating_dependencies(asset_id)]
 
