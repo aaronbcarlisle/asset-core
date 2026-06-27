@@ -17,14 +17,16 @@ Prereqs on the SG site (one-time):
     (Asset list view -> + -> Field; type Text). `sg_status_list` exists by default.
 
 Run:
-    export SHOTGRID_URL=https://asset-core-dev.shotgrid.autodesk.com
-    export SHOTGRID_SCRIPT=assetcore
+    export SHOTGRID_URL=https://<site>.shotgrid.autodesk.com
+    export SHOTGRID_SCRIPT=<your script name>    # exact, case-sensitive (site-specific)
     export SHOTGRID_API_KEY=<the script key>     # secret; never commit
+    export SHOTGRID_PROJECT='Demo: Game'         # id or name (SG Assets are project-scoped)
     python -m uvicorn assetcore.service.app:app --port 8765   # (in another shell)
     python scripts/live_shotgrid_mirror.py
 
-Config via env: SHOTGRID_URL / SHOTGRID_SCRIPT / SHOTGRID_API_KEY, ASSETCORE_URL
-(default http://127.0.0.1:8765), ASSETCORE_DEPS (default <repo-parent>/sg-deps).
+Required env: SHOTGRID_URL / SHOTGRID_SCRIPT / SHOTGRID_API_KEY. Optional:
+SHOTGRID_PROJECT (default "Demo: Game"), ASSETCORE_URL (default
+http://127.0.0.1:8765), ASSETCORE_DEPS (default <repo-parent>/sg-deps).
 """
 import os
 import sys
@@ -35,7 +37,7 @@ sys.path[:0] = [_REPO, _DEPS]
 
 URL = os.environ.get("ASSETCORE_URL", "http://127.0.0.1:8765")
 SG_URL = os.environ.get("SHOTGRID_URL")
-SG_SCRIPT = os.environ.get("SHOTGRID_SCRIPT", "asset-core-dev")
+SG_SCRIPT = os.environ.get("SHOTGRID_SCRIPT")   # site-specific; no sensible default
 SG_KEY = os.environ.get("SHOTGRID_API_KEY")
 SG_PROJECT = os.environ.get("SHOTGRID_PROJECT", "Demo: Game")  # id or name; SG Assets are project-scoped
 UUID_FIELD = "sg_assetcore_uuid"
@@ -46,9 +48,9 @@ def step(msg):
 
 
 def main() -> int:
-    if not (SG_URL and SG_KEY):
-        print("ERROR: set SHOTGRID_URL and SHOTGRID_API_KEY (see this file's header).",
-              file=sys.stderr)
+    if not (SG_URL and SG_SCRIPT and SG_KEY):
+        print("ERROR: set SHOTGRID_URL, SHOTGRID_SCRIPT, SHOTGRID_API_KEY "
+              "(see this file's header).", file=sys.stderr)
         return 2
 
     import shotgun_api3
