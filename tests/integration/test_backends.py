@@ -28,7 +28,10 @@ def _build_backends():
         try:
             import psycopg2  # noqa: F401
         except ImportError:
-            pass
+            # DSN set but driver missing: report an explicit skip, don't silently omit
+            backends.append(pytest.param(
+                None, id="postgres",
+                marks=pytest.mark.skip(reason="ASSETCORE_TEST_DSN set but psycopg2 not installed")))
         else:
             from assetcore.infra.postgres_repo import PostgresRepo
 
