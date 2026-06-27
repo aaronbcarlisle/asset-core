@@ -8,8 +8,9 @@ The character-animation reality the research surfaced, proven on BOTH backends:
     forked clip (DERIVED_FROM) goes stale and must be re-propagated, flagged by
     stale_derivations
   - skeleton blast radius via transitive dependents ("what breaks if I touch it")
-  - rename-for-IP (Batman -> Nightwing): identity changes, the bytes and every set
-    membership that references the identity are untouched
+  - rename-for-IP (Batman -> Nightwing): the identity FACET (display name) changes,
+    while the asset UUID, the bytes, and every set membership keyed by that UUID
+    are untouched
 
 Companion to the environment workflow; same Phase-11 foundation.
 """
@@ -96,13 +97,13 @@ def test_animation_workflow(backend):
     assert {w["bat_walk"], w["bat_run"], w["bat_grapple"], w["rob_cape"]} <= rig_impact  # clips
     assert {w["bat_set"], w["rob_set"], w["batman"], w["robin"]} <= rig_impact           # ...up to chars
 
-    # --- rename-for-IP: Batman -> Nightwing; identity changes, links survive -----
+    # --- rename-for-IP: Batman -> Nightwing; the display name changes, the UUID + links survive
     src_before = verbs.resolve(repo, w["bat_walk"])["source"].location_uri
     verbs.rename(repo, sink, w["bat_walk"], "Nightwing Walk", "prod:pat")
     verbs.rename(repo, sink, w["batman"], "Nightwing", "prod:pat")
     assert verbs.resolve(repo, w["bat_walk"])["identity"].display_name == "Nightwing Walk"
     assert verbs.resolve(repo, w["bat_walk"])["source"].location_uri == src_before   # bytes untouched
-    # both sets still compose the (renamed) walk — they referenced the IDENTITY, not the name
+    # both sets still compose the (renamed) walk — they referenced the asset UUID, not the name
     walk_sets_after = {e.from_asset for e in verbs.used_by(repo, w["bat_walk"])
                        if e.rel_type == RelType.COMPOSED_OF}
     assert walk_sets_after == {w["bat_set"], w["rob_set"]}

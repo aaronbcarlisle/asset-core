@@ -5,7 +5,7 @@
 The character-animation story: a shared skeleton, locomotion sets that reuse a
 single walk cycle (shared, live) vs fork a grapple (DERIVED_FROM, must re-propagate),
 the skeleton's blast radius, and a Batman -> Nightwing rename that keeps every set
-membership because they reference the IDENTITY, not the name.
+membership because they reference the asset UUID, not the name.
 """
 import os
 import sys
@@ -72,11 +72,12 @@ rig_impact = verbs.dependents(repo, skeleton)
 say(f"  touching the shared skeleton impacts {len(rig_impact)} assets "
     f"(every clip -> set -> character) — see it before you do it")
 
-say("\n== Batman -> Nightwing (IP rename): identity changes, links survive ==")
+say("\n== Batman -> Nightwing (IP rename): display name changes, UUID + links survive ==")
 verbs.rename(repo, sink, bat_walk, "Nightwing Walk", "prod:pat")
 verbs.rename(repo, sink, batman, "Nightwing", "prod:pat")
 sets_after = [e.from_asset for e in verbs.used_by(repo, bat_walk) if e.rel_type == RelType.COMPOSED_OF]
 say(f"  renamed to '{verbs.resolve(repo, bat_walk)['identity'].display_name}'; "
     f"still in {len(sets_after)} sets, source unchanged ({verbs.resolve(repo, bat_walk)['source'].location_uri})")
 
-say(f"\n[OK] {len(sink.events)} events on the spine. Reuse is by identity, so a rename never breaks a set.\n")
+say(f"\n[OK] {len(sink.events)} events on the spine. Reuse is by asset UUID, so a rename "
+    "(display name) never breaks a set.\n")
