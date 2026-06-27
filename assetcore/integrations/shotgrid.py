@@ -27,9 +27,20 @@ class _RealShotGridSite:
     ENTITY = "Asset"
     UUID_FIELD = "sg_assetcore_uuid"
 
-    def __init__(self, base_url: str, script_name: str, api_key: str) -> None:
+    def __init__(self, base_url: str, script_name: str, api_key: str, project) -> None:
         import shotgun_api3  # noqa: PLC0415 — lazy; absent without the SG client
         self._sg = shotgun_api3.Shotgun(base_url, script_name=script_name, api_key=api_key)
+        # ShotGrid Assets are project-scoped, so creates need a target Project.
+        # `project` may be an id (int / numeric str) or a Project name.
+        self._project = self._resolve_project(project)
+
+    def _resolve_project(self, project) -> dict:
+        if isinstance(project, int) or (isinstance(project, str) and project.isdigit()):
+            return {"type": "Project", "id": int(project)}
+        rec = self._sg.find_one("Project", [["name", "is", project]])
+        if rec is None:
+            raise ValueError(f"no ShotGrid Project named {project!r}")
+        return {"type": "Project", "id": rec["id"]}
 
     # map identity fields -> ShotGrid columns; only non-None ones are written, so a
     # mirror never clears a column the core didn't set.
@@ -42,7 +53,8 @@ class _RealShotGridSite:
         if existing:
             self._sg.update(self.ENTITY, existing["id"], data)
         else:
-            self._sg.create(self.ENTITY, {**data, self.UUID_FIELD: asset_id})
+            self._sg.create(self.ENTITY,
+                            {**data, self.UUID_FIELD: asset_id, "project": self._project})
 
     def get(self, external_id: str) -> dict:
         rec = self._sg.find_one(self.ENTITY, [["id", "is", int(external_id)]],
@@ -65,11 +77,13 @@ class ShotGridAdapter(TrackerAdapter):
         return self._site.get(external_id)
 
 
-@providers.register("tracker", "shotgrid", requires=["base_url", "script_name", "api_key"])
+@providers.register("tracker", "shotgrid",
+                    requires=["base_url", "script_name", "api_key", "project"])
 def _build_shotgrid(config, client):
     site = _RealShotGridSite(
         base_url=config["base_url"],
         script_name=config["script_name"],
         api_key=config["api_key"],
+        project=config["project"],
     )
     return ShotGridAdapter(client, site)

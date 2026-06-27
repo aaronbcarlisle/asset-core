@@ -35,8 +35,9 @@ sys.path[:0] = [_REPO, _DEPS]
 
 URL = os.environ.get("ASSETCORE_URL", "http://127.0.0.1:8765")
 SG_URL = os.environ.get("SHOTGRID_URL")
-SG_SCRIPT = os.environ.get("SHOTGRID_SCRIPT", "assetcore")
+SG_SCRIPT = os.environ.get("SHOTGRID_SCRIPT", "asset-core-dev")
 SG_KEY = os.environ.get("SHOTGRID_API_KEY")
+SG_PROJECT = os.environ.get("SHOTGRID_PROJECT", "Demo: Game")  # id or name; SG Assets are project-scoped
 UUID_FIELD = "sg_assetcore_uuid"
 
 
@@ -61,8 +62,10 @@ def main() -> int:
     artist = AssetcoreClient(token="artist-token", base_url=URL)   # declare
     prod = AssetcoreClient(token="prod-token", base_url=URL)       # claim/rename (production view)
     try:
-        site = _RealShotGridSite(base_url=SG_URL, script_name=SG_SCRIPT, api_key=SG_KEY)
+        site = _RealShotGridSite(base_url=SG_URL, script_name=SG_SCRIPT, api_key=SG_KEY,
+                                 project=SG_PROJECT)
         adapter = ShotGridAdapter(prod, site)
+        step(f"target ShotGrid project: {SG_PROJECT!r}")
 
         name = "Live Test Barrel"
         aid = artist.declare("prop", "env_amy")
