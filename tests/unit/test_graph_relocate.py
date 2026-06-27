@@ -63,6 +63,9 @@ def test_dependents_reltype_filter_and_depth():
     repo, _s, city, district, prop = _env_graph()
     assert {a for a, _d, _rt in verbs.dependents(repo, prop, max_depth=1)} == {district}
     assert verbs.dependents(repo, prop, rel_types=["DEPENDS_ON"]) == []   # no such edges
+    # None -> all types (both reached); explicit [] -> match nothing (not "all")
+    assert len(verbs.dependents(repo, prop, rel_types=None)) == 2
+    assert verbs.dependents(repo, prop, rel_types=[]) == []
 
 
 # --- relocate: bytes move, identity + edges + version untouched ------------

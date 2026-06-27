@@ -233,7 +233,9 @@ def floating_dependencies(repo: AssetRepo, asset_id: UUID) -> list[Relationship]
 # DEPENDENTS / DEPENDENCIES — transitive graph closures (the impact brain).
 # ---------------------------------------------------------------------------
 def _as_reltypes(rel_types) -> set[RelType] | None:
-    return {RelType(rt) for rt in rel_types} if rel_types else None
+    # None -> no filter (traverse all edge types); an explicit empty list -> match
+    # nothing (don't silently widen an empty filter to "everything").
+    return None if rel_types is None else {RelType(rt) for rt in rel_types}
 
 
 def dependents(repo: AssetRepo, asset_id: UUID, rel_types=None,
