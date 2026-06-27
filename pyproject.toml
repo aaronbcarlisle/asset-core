@@ -1,0 +1,15 @@
+[project]
+name = "assetcore"
+version = "0.1.0"
+description = "Identity-first asset management for game & film production pipelines"
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+postgres = ["psycopg2-binary>=2.9"]
+service = ["fastapi>=0.110", "uvicorn>=0.27"]
+dev = ["pytest>=8.0"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
