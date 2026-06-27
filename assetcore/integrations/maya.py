@@ -58,6 +58,7 @@ class _RealMayaScene:
 
     def file_info_set(self, key: str, value: str) -> None:
         self._cmds.fileInfo(key, value)
+        self._cmds.file(save=True)   # persist the stamp into the .ma so it round-trips
 
 
 class _RealMayaVcs:
