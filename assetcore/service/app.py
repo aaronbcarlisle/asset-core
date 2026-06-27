@@ -14,7 +14,6 @@ from fastapi import FastAPI, Request
 from assetcore.app.services import AssetcoreService
 from assetcore.core.ports import AssetRepo, EventSink
 from assetcore.infra.broadcast_sink import BroadcastSink
-from assetcore.infra.sqlite_repo import SqliteRepo
 from assetcore.service import auth
 from assetcore.service.routes import router
 
@@ -25,9 +24,20 @@ def create_app(
     tokens: dict[str, str] | None = None,
 ) -> FastAPI:
     if repo is None:
-        # one process-lifetime connection, reached from the event-loop worker thread
-        repo = SqliteRepo(os.environ.get("ASSETCORE_SQLITE_PATH", ":memory:"),
-                          check_same_thread=False)
+        # backend selection is config-driven (no if/elif): build through the same
+        # provider registry the trackers use. ASSETCORE_CONFIG names a repo in the
+        # toml; absent that, the runnable-here default (sqlite :memory:) — still via
+        # the registry, so there's one mechanism for every service swap.
+        import assetcore.infra._providers  # noqa: F401 — runs repo registrations
+        from assetcore.sdk import providers
+
+        cfg_path = os.environ.get("ASSETCORE_CONFIG")
+        if cfg_path:
+            from assetcore.sdk.settings import Settings
+            repo = Settings.load(cfg_path).repo("main")
+        else:
+            repo = providers.build("repo", "sqlite",
+                                   {"path": os.environ.get("ASSETCORE_SQLITE_PATH", ":memory:")})
     if sink is None:
         sink = BroadcastSink()
 

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from assetcore.sdk import providers
 from assetcore.sdk.tracker_adapter import TrackerAdapter
 
 
@@ -62,3 +63,13 @@ class ShotGridAdapter(TrackerAdapter):
 
     def pull_identity(self, external_id: str) -> dict:
         return self._site.get(external_id)
+
+
+@providers.register("tracker", "shotgrid")
+def _build_shotgrid(config, client):
+    site = _RealShotGridSite(
+        base_url=config["base_url"],
+        script_name=config["script_name"],
+        api_key=config["api_key"],
+    )
+    return ShotGridAdapter(client, site)
