@@ -18,6 +18,23 @@ firewall. CI must run this; a PR that does `import maya` in `core/` fails here.
 The AST source-scan in `tests/contract/test_sdk_firewall.py` is a zero-dependency
 backstop that runs in the normal test suite.
 
+## Config validation (assetcore.toml — fail fast before deploy)
+
+`assetcore.toml` is the single service-selection surface, so validate it in CI and
+before any deploy that changes it:
+
+```
+SHOTGRID_API_KEY=... python -m scripts.validate_config assetcore.toml   # exit 0 / 1
+```
+
+It reports every problem at once — unknown sections, unknown provider names (with
+the available list), missing required config keys, and required keys whose value is
+empty or an unset `${ENV}` ref (so a forgotten secret fails here, not at first use).
+Optional keys (sqlite `path` → `:memory:`) may be empty. Run it with the same
+environment the service will have, so `${ENV}` refs resolve as they would in prod.
+The service also self-validates its repo config (`["repo"]`) at startup when
+`ASSETCORE_CONFIG` is set.
+
 ## Migrations (Postgres)
 
 The canonical reference DDL is `assetcore/infra/schema.sql`; the *managed* path for

@@ -77,14 +77,26 @@ end to end.
 - The registry is the SAME plugin shape as `ResolverRegistry` — one mental model for
   "swap a backing service," whether it's a tracker, a VCS, or a storage scheme.
 
+## Config validation (Phase 10)
+
+`assetcore.toml` is the single most operationally important file in a deployment,
+so it is validated up front (fail-fast at startup, not at first use):
+
+- `Settings.validate(capabilities=None)` reports **every** problem at once via
+  `ConfigError`: unknown sections, unknown provider names (with the `available()`
+  list), missing required config keys, and required keys whose value is empty or an
+  unset `${ENV}` ref. Optional keys (e.g. sqlite `path` → `:memory:`) may be empty.
+- Each provider declares the keys it needs at registration
+  (`@register(cap, name, requires=[...])`), so validation stays generic — the config
+  layer never learns a provider's internals.
+- Provider-name checks need registrations loaded, so the **composition root** runs
+  validation: `service/app.py` validates the capability it consumes (`["repo"]`),
+  and `python -m scripts.validate_config [path]` (which imports every registration)
+  validates the whole file in CI / pre-deploy. Default scope is every capability
+  with a registered provider, so describe-only sections don't false-positive.
+
 ## Deferred (natural follow-ups)
 
-- Startup config validation: today a misspelled provider name fails at first use
-  with an `available()` hint. A "validate the whole `assetcore.toml` on load" pass —
-  every named provider exists, every required config key present — is a good
-  hardening item once trackers + repos + VCS all flow through the one registry, since
-  `assetcore.toml` then becomes the single most operationally important file in a
-  deployment.
 - Wiring Perforce/git resolvers and runtime stores in as `source_vcs` /
   `runtime_store` providers (the toml already *describes* them).
 - Unifying `ResolverRegistry` into the generic registry.
