@@ -52,6 +52,29 @@ round-trips and `resolve()` reflects it -> `p4 submit` -> re-publish to advance 
 source version to a real changelist. Config via env (`ASSETCORE_URL`, `P4_BIN`,
 `P4_WS`, `P4PORT/P4USER/P4CLIENT`); local defaults match the setup above.
 
-## Unreal 5.8, 3ds Max, ShotGrid
+## Unreal 5.8 -> assetcore (runtime facet)
+
+The `unreal` module exists only inside a running editor, so this runs headless via
+the editor commandlet rather than a standalone interpreter. It needs a UE project
+(a minimal content-only `.uproject` with `PythonScriptPlugin` enabled is enough)
+and `httpx` for the editor's Python (installed beside the repo in `ue-deps/`, added
+to `sys.path` by the driver; override with `ASSETCORE_DEPS`).
+
+```bash
+UEPY="/d/UE/UE_5.8/Engine/Binaries/ThirdParty/Python3/Win64/python.exe"
+"$UEPY" -m pip install --target ../ue-deps httpx
+# with the service running:
+UE="/d/UE/UE_5.8/Engine/Binaries/Win64/UnrealEditor-Cmd.exe"
+"$UE" /path/to/AssetcoreProbe.uproject -nullrhi -unattended -nosplash -nop4 \
+    -ExecutePythonScript="$(pwd)/scripts/live_unreal_reconcile.py"
+```
+
+`scripts/live_unreal_reconcile.py` ensures a probe asset exists in `/Game`, mints +
+stamps identity into each asset's metadata tag, runs `reconcile` (bind the runtime
+facet for every stamped asset), and verifies `resolve()` reflects it. The editor's
+own log (the verbose one) is `<project>/Saved/Logs/<Project>.log`; grep it for
+`LIVE_UNREAL_RESULT:` and the `[live-unreal]` lines for the outcome.
+
+## 3ds Max, ShotGrid
 
 (added as each is proven)
