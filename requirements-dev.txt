@@ -3,5 +3,9 @@ pytest>=8.0
 fastapi>=0.110
 uvicorn>=0.27
 httpx>=0.27
+# hardening (Phase 8): firewall gate + migrations
+import-linter>=2.0
+alembic>=1.13
+sqlalchemy>=2.0
 # optional, for the production Postgres backend:
 # psycopg2-binary>=2.9

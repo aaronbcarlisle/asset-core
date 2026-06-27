@@ -66,3 +66,12 @@ def test_reconcile_skips_unstamped_assets(engine):
 
     bound = adapter.reconcile("build_1")
     assert set(bound) == {"/Game/Stamped"}     # unstamped is never guessed at
+
+
+def test_on_asset_saved_binds_immediately(engine):
+    adapter, create_asset = engine
+    create_asset("/Game/JustSaved")
+    version = adapter.on_asset_saved("/Game/JustSaved", "live_build")  # save-hook path
+    assert version == 1
+    aid = adapter.read_stamp("/Game/JustSaved")
+    assert adapter.client.resolve(aid)["runtime"]["location_uri"] == "/Game/JustSaved"

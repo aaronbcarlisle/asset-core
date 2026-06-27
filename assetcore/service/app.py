@@ -7,8 +7,9 @@ swap that makes tools and storage disposable. `uvicorn assetcore.service.app:app
 runs the default instance.
 """
 import os
+import time
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 
 from assetcore.app.services import AssetcoreService
 from assetcore.core.ports import AssetRepo, EventSink
@@ -35,6 +36,19 @@ def create_app(
     app.state.service = AssetcoreService(repo, sink)
     app.state.sink = sink
     app.state.tokens = tokens if tokens is not None else auth.load_tokens()
+    app.state.latency = {"count": 0, "total_ms": 0.0, "max_ms": 0.0}
+
+    @app.middleware("http")
+    async def _time_requests(request: Request, call_next):
+        start = time.perf_counter()
+        response = await call_next(request)
+        elapsed_ms = (time.perf_counter() - start) * 1000.0
+        lat = request.app.state.latency
+        lat["count"] += 1
+        lat["total_ms"] += elapsed_ms
+        lat["max_ms"] = max(lat["max_ms"], elapsed_ms)
+        return response
+
     app.include_router(router)
     return app
 

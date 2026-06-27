@@ -17,13 +17,14 @@ _KEEPALIVE_SECONDS = 15
 def _format(seq: int, event: Event) -> str:
     data = {
         "seq": seq,
+        "event_id": str(event.id),            # stable id for subscriber-side dedupe
         "asset_id": str(event.asset_id) if event.asset_id is not None else None,
         "event_type": event.event_type,
         "payload": event.payload,
         "actor": event.actor,
         "occurred_at": event.occurred_at.isoformat(),
     }
-    # SSE frame: an id (for Last-Event-ID reconnects) and a data line.
+    # SSE frame: the seq is the SSE id (the reconnect cursor / Last-Event-ID).
     return f"id: {seq}\nevent: {event.event_type}\ndata: {json.dumps(data)}\n\n"
 
 

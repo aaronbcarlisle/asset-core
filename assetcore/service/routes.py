@@ -4,6 +4,7 @@ Mutations are POST and authority-guarded; queries are GET and open. This layer
 only translates HTTP <-> service calls and maps domain errors to status codes;
 every rule lives below in app/core.
 """
+from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -47,6 +48,18 @@ def _require_asset(service: AssetcoreService, asset_id: UUID) -> None:
 @router.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
+
+@router.get("/metrics")
+def metrics(request: Request, service: AssetcoreService = Depends(get_service)) -> dict:
+    """Operational health: lifecycle mix, facet coverage, provisional age, latency."""
+    data = service.metrics(datetime.now(timezone.utc))
+    lat = request.app.state.latency
+    data["events_emitted"] = getattr(request.app.state.sink, "last_seq", 0)
+    data["request_count"] = lat["count"]
+    data["avg_latency_ms"] = round(lat["total_ms"] / lat["count"], 2) if lat["count"] else 0.0
+    data["max_latency_ms"] = round(lat["max_ms"], 2)
+    return data
 
 
 # --- identity lifecycle -----------------------------------------------------
@@ -184,6 +197,14 @@ def floating_dependencies(asset_id: UUID,
 # --- the event spine --------------------------------------------------------
 @router.get("/events")
 async def events(request: Request, after_seq: int = 0) -> StreamingResponse:
+    # SSE reconnect: the browser/agent resends the last seq it saw as Last-Event-ID,
+    # so a dropped connection resumes with no gap and no manual cursor.
+    last_event_id = request.headers.get("Last-Event-ID")
+    if last_event_id and not after_seq:
+        try:
+            after_seq = int(last_event_id)
+        except ValueError:
+            pass
     sink = request.app.state.sink
     return StreamingResponse(
         event_source(sink, request, after_seq),

@@ -11,9 +11,10 @@ port to expose transaction control, which it deliberately does not yet — when 
 workflow needs several verbs to commit-or-rollback together, that becomes a new
 port method, not a leak in this layer.
 """
+from datetime import datetime
 from uuid import UUID
 
-from assetcore.app import verbs
+from assetcore.app import observability, verbs
 from assetcore.core.entities import Relationship, SourceVersion
 from assetcore.core.ports import AssetRepo, EventSink
 from assetcore.core.types import BindingMode, RelType
@@ -69,3 +70,20 @@ class AssetcoreService:
 
     def floating_dependencies(self, asset_id: UUID) -> list[Relationship]:
         return verbs.floating_dependencies(self.repo, asset_id)
+
+    def metrics(self, now: datetime) -> dict:
+        assets = self.repo.list_assets()
+        total = len(assets)
+        with_source = sum(1 for a in assets
+                          if any(v.is_latest for v in self.repo.source_versions(a.id)))
+        with_runtime = sum(1 for a in assets
+                           if any(v.is_latest for v in self.repo.runtime_versions(a.id)))
+        ages = observability.provisional_ages_seconds(assets, now)
+        return {
+            "assets_total": total,
+            "lifecycle": observability.lifecycle_counts(assets),
+            "source_coverage_pct": observability.coverage_pct(with_source, total),
+            "runtime_coverage_pct": observability.coverage_pct(with_runtime, total),
+            "provisional_count": len(ages),
+            "oldest_provisional_age_seconds": round(max(ages), 1) if ages else 0.0,
+        }

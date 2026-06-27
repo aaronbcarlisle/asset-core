@@ -54,3 +54,15 @@ class EngineAdapter(ABC):
                 continue                      # unstamped: not ours to bind (never guess)
             bound[path] = self.client.bind_runtime(asset_id, self.current_location(path), build_id)
         return bound
+
+    def on_asset_saved(self, asset_path: str, build_id: str,
+                       asset_type: str = "engine_asset") -> int:
+        """Event-driven reconcile: bind one asset the instant the editor saves it.
+
+        Where the engine exposes a save hook, this replaces waiting for the next
+        periodic reconcile — the runtime facet goes from eventually- to immediately-
+        consistent for that asset (ARCHITECTURE Part 7.2 / Phase 8). Mints identity
+        first if the asset is editor-native.
+        """
+        asset_id = self.ensure_identity(asset_path, asset_type)
+        return self.client.bind_runtime(asset_id, self.current_location(asset_path), build_id)

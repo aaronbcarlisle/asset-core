@@ -141,6 +141,24 @@ def test_duplicate_edge_is_400(client):
     assert client.post("/relate", json=body, headers=ARTIST).status_code == 400
 
 
+# --- observability (Phase 8) -----------------------------------------------
+def test_metrics_endpoint(client):
+    a = _declare(client)
+    client.post(f"/assets/{a}/source", json={"location_uri": "//x.ma", "tool": "maya",
+                "revision": "1", "published_by": "amy"}, headers=ARTIST)
+    b = _declare(client)
+    client.post(f"/assets/{b}/claim", json={"display_name": "N", "taxonomy": "t",
+                "actor": "pat"}, headers=PROD)
+
+    m = client.get("/metrics").json()
+    assert m["assets_total"] == 2
+    assert m["lifecycle"]["provisional"] == 1 and m["lifecycle"]["active"] == 1
+    assert m["source_coverage_pct"] == 50.0          # only `a` has a source
+    assert m["provisional_count"] == 1
+    assert m["events_emitted"] >= 3                   # declared x2 + source + claim
+    assert m["request_count"] >= 1 and m["avg_latency_ms"] >= 0.0
+
+
 # --- human surfaces (Phase 7) ----------------------------------------------
 def test_find_similar_endpoint(client):
     a = _declare(client)

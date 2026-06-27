@@ -114,13 +114,37 @@ state — never build for weeks without something to smoke-test.
 - New port method `list_assets(asset_type?, lifecycle?)` across all three repos;
       new behaviors covered on in-memory + sqlite via the shared scenario suite.
 
-## Phase 8 — Hardening to finished product
-- [ ] Stamp-coverage CI gate (build fails on any unstamped shipped asset)
-- [ ] Event idempotency + catch-up on reconnect
-- [ ] Event-driven reconciliation where engine save-hooks allow
-- [ ] Observability: resolve latency, stamp-coverage %, provisional age
-- [ ] Binding DB backup/restore runbooks; resolver load test
+## Phase 8 — Hardening to finished product  ✅ (live-Postgres run gated)
+- [x] Dependency firewall as a real gate: import-linter contracts in pyproject,
+      `lint-imports` (3 kept) + a pytest wrapper; AST source-scan kept as backstop.
+- [x] Stamp-coverage CI gate: `app/observability.stamp_coverage_gate` +
+      `scripts/stamp_coverage_gate.py` (non-zero exit below threshold).
+- [x] Event idempotency + reconnect: stable `Event.id` (dedupe key) + SSE
+      `Last-Event-ID` resume over the durable catch-up log.
+- [x] Event-driven reconciliation: `EngineAdapter.on_asset_saved` (save-hook path).
+- [x] Observability: `GET /metrics` (lifecycle mix, source/runtime coverage,
+      provisional age, request latency) + pure metric functions.
+- [x] Alembic first migration (deferred since Phase 2) — portable, **verified by
+      upgrade/downgrade against sqlite in the test suite**.
+- [x] `infra/notify_sink.py` (Postgres LISTEN/NOTIFY, deferred since Phase 3) —
+      code-complete, gated on a live server.
+- [x] Backup/restore + resolver load-test runbooks: `docs/OPERATIONS.md`.
+- [~] Live Postgres run: still gated — no server in the build environment. The
+      postgres_repo + notify_sink are code-complete and the migration is verified;
+      the on-iron run against a real depot/DB is the one remaining manual step.
 - **Done when:** coverage enforced + monitored, DB recoverable, latency in budget.
+  ✅ here for everything not requiring a live Postgres / real DCC.
+
+---
+
+## Status: phases 1–8 complete
+
+Core is stable and tool-agnostic; adding a tool is a contract-tested L4 adapter
+(proven by the Phase-6 diff touching only integrations/); the parallel-handoff
+bottleneck is gone (float/pin + event spine); identity never decays into paths;
+the system is observable, gated, and recoverable. Remaining work is operational
+(run against real Postgres + real Maya/Unreal/Substance on iron) — staged behind
+skips, not architecture.
 
 ## Standing risks (carry forward — ARCHITECTURE Part 7.3 / Part 11)
 

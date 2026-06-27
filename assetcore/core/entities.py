@@ -82,9 +82,14 @@ class Relationship:
 
 @dataclass
 class Event:
-    """An append-only fact. Every facet write emits one."""
+    """An append-only fact. Every facet write emits one.
+
+    `id` is a stable unique identity for at-least-once delivery: subscribers
+    dedupe on it, so a redelivered event (after a reconnect catch-up) is harmless.
+    """
     asset_id: UUID | None
     event_type: str
     payload: dict = field(default_factory=dict)
     actor: str | None = None
     occurred_at: datetime = field(default_factory=_now)
+    id: UUID = field(default_factory=_new_id)
