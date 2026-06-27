@@ -14,18 +14,30 @@ state — never build for weeks without something to smoke-test.
 - [x] Maya/Unreal integration stubs
 - [x] Full architecture blueprint (`docs/ARCHITECTURE.md`)
 
-## Phase 1 — Pure core (no I/O)
+## Phase 1 — Pure core (no I/O)  ✅
 > Full task brief with file specs, signatures, and done-when checklist: **docs/PHASE1.md**
-- [ ] `core/entities.py`, `types.py`, `rules.py`, `ports.py`
-- [ ] `infra/inmemory_repo.py`
-- [ ] Port the 3 scenarios to unit tests vs InMemoryRepo (millisecond, no DB)
-- **Done when:** scenarios + invariants pass with zero database.
+- [x] `core/entities.py`, `types.py`, `rules.py`, `ports.py`
+- [x] `infra/inmemory_repo.py`
+- [x] Port the 3 scenarios to unit tests vs InMemoryRepo (millisecond, no DB)
+- **Done when:** scenarios + invariants pass with zero database. ✅
 
-## Phase 2 — Verbs + real storage
-- [ ] `app/verbs.py`, `app/services.py` against the ports
-- [ ] `infra/sqlite_repo.py`, `infra/postgres_repo.py`, first Alembic migration
-- [ ] Same suite green across in-memory / sqlite / postgres
-- **Done when:** identical tests pass on all three backends (proves the port).
+## Phase 2 — Verbs + real storage  ✅ (with two deferrals)
+- [x] `app/verbs.py` against the ports
+      — `app/services.py` **deferred to Phase 3**: its job is transaction
+        boundaries, which only become real when the service composes verbs.
+        Per-method atomicity (demote+insert in one tx) lives in the repos now.
+- [x] `infra/sqlite_repo.py`, `infra/postgres_repo.py`
+      — first **Alembic migration deferred to Phase 3** (when Postgres is the
+        live target). The canonical `infra/schema.sql` is the bootstrap DDL today.
+- [x] Same suite green across in-memory / sqlite; **postgres gated** behind
+      `ASSETCORE_TEST_DSN` + psycopg2 (skips cleanly when absent, never silently
+      passes). One shared scenario suite (`tests/scenarios_common.py`) runs on
+      every backend.
+- Resolved PHASE1 decision #4: the one-latest invariant moved out of the verb
+  into the repos' `add_*_version` (write-time guarantee, matching the
+  `one_latest_*` unique indexes).
+- **Done when:** identical tests pass across the runnable backends (proves the
+  port). ✅ in-memory + sqlite; postgres ready on a live DSN.
 
 ## Phase 3 — The service (the only door)
 - [ ] `service/` FastAPI exposing every verb; `auth.py` per authority

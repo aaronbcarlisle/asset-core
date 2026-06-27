@@ -1,13 +1,14 @@
 """Dict-backed AssetRepo + EventSink — the zero-setup backend for unit tests.
 
-Satisfies the core.ports protocols structurally (no inheritance). It stores the
-actual entity objects, not copies, so the verbs' read-mutate-persist pattern for
-the one-latest invariant (rules.demote_latest mutating a fetched version list)
-works without an explicit demote port method. SqliteRepo/PostgresRepo in Phase 2
-will fold that demotion into add_*_version instead — see PHASE1 decision #4.
+Satisfies the core.ports protocols structurally (no inheritance). The one-latest
+invariant is a write-time guarantee: add_*_version demotes the prior latest as
+part of the write (reusing the pure rules.demote_latest), exactly as the SQL
+backends do via their one_latest_* unique indexes. This is the resolution of
+PHASE1 decision #4 — the invariant lives at the storage boundary, not in the verb.
 """
 from uuid import UUID
 
+from assetcore.core.rules import demote_latest
 from assetcore.core.entities import (
     Asset,
     Event,
@@ -48,6 +49,8 @@ class InMemoryRepo:
 
     # --- source facet ---
     def add_source_version(self, v: SourceVersion) -> None:
+        # enforce one_latest_source: demote the prior latest as part of the write
+        demote_latest(self.source_versions(v.asset_id))
         self.sources.append(v)
 
     def source_versions(self, asset_id: UUID) -> list[SourceVersion]:
@@ -59,6 +62,7 @@ class InMemoryRepo:
 
     # --- runtime facet ---
     def add_runtime_version(self, v: RuntimeVersion) -> None:
+        demote_latest(self.runtime_versions(v.asset_id))
         self.runtimes.append(v)
 
     def runtime_versions(self, asset_id: UUID) -> list[RuntimeVersion]:

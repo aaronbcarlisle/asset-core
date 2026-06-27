@@ -67,9 +67,9 @@ def rename(repo: AssetRepo, sink: EventSink, asset_id: UUID, new_name: str,
 # ---------------------------------------------------------------------------
 def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: str,
                 tool: str, revision: str, published_by: str) -> int:
-    existing = repo.source_versions(asset_id)
-    v = rules.next_version_num(existing)
-    rules.demote_latest(existing)            # mutates prior latest; repo holds live refs
+    v = rules.next_version_num(repo.source_versions(asset_id))
+    # The repo demotes the prior latest as part of the write (the schema's
+    # one_latest_source unique index forces demote-then-insert atomically).
     repo.add_source_version(SourceVersion(
         asset_id=asset_id, location_uri=location_uri, tool=tool,
         revision=str(revision), version_num=v, is_latest=True, published_by=published_by,
@@ -84,9 +84,8 @@ def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: 
 # ---------------------------------------------------------------------------
 def bind_runtime(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: str,
                  build_id: str) -> int:
-    existing = repo.runtime_versions(asset_id)
-    v = rules.next_version_num(existing)
-    rules.demote_latest(existing)
+    v = rules.next_version_num(repo.runtime_versions(asset_id))
+    # one_latest_runtime invariant is enforced at write time by the repo.
     repo.add_runtime_version(RuntimeVersion(
         asset_id=asset_id, location_uri=location_uri, build_id=build_id,
         version_num=v, is_latest=True,
