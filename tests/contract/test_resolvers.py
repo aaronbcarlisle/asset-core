@@ -56,17 +56,43 @@ def test_perforce_resolver_builds_sync_then_where():
     """The p4 command construction is verified via an injected runner (no server)."""
     calls = []
 
-    # the default %path% format makes `where` return just the local path:
+    # `-ztag where` returns tagged lines; the local path is the `... path` field.
+    # (Real P4D leaves `-F "%path%"` empty, which is why we parse -ztag — see resolver.)
     def fake_runner(args):
         calls.append(args)
-        return "" if args[:2] == ["p4", "sync"] else "/local/art/barrel.ma\n"
+        if args[:2] == ["p4", "sync"]:
+            return ""
+        return ("... depotFile //depot/art/barrel.ma\n"
+                "... clientFile //ws/art/barrel.ma\n"
+                "... path /local/art/barrel.ma\n")
 
     resolver = PerforceResolver(runner=fake_runner)
     local = resolver.fetch("//depot/art/barrel.ma@4101")
 
     assert local == "/local/art/barrel.ma"
     assert calls[0] == ["p4", "sync", "//depot/art/barrel.ma@4101"]   # synced with @CL
-    assert calls[1] == ["p4", "-F", "%path%", "where", "//depot/art/barrel.ma"]  # @CL stripped
+    assert calls[1] == ["p4", "-ztag", "where", "//depot/art/barrel.ma"]  # @CL stripped
+
+
+def test_perforce_resolver_takes_last_path_when_multiple_mappings():
+    """With exclusionary/overlapping view lines, `where` lists several mappings and
+    the LAST one is effective — the resolver must return that one."""
+    def fake_runner(args):
+        if args[:2] == ["p4", "sync"]:
+            return ""
+        return ("... path /old/excluded/barrel.ma\n"
+                "... path /local/art/barrel.ma\n")
+
+    assert PerforceResolver(runner=fake_runner).fetch("//depot/art/barrel.ma") == \
+        "/local/art/barrel.ma"
+
+
+def test_perforce_resolver_raises_when_no_path_field():
+    def fake_runner(args):
+        return "" if args[:2] == ["p4", "sync"] else "... depotFile //depot/x.ma\n"
+
+    with pytest.raises(FileNotFoundError):
+        PerforceResolver(runner=fake_runner).fetch("//depot/x.ma")
 
 
 def test_default_registry_routes_depot_and_file():
