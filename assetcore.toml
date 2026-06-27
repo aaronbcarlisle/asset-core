@@ -1,0 +1,49 @@
+# assetcore.toml — the ONLY place a studio names its backing services.
+#
+# Swapping ShotGrid for Jira, or sqlite for postgres, is editing THIS file.
+# No application code changes, no conditional in the composition root. Point the
+# service at it with ASSETCORE_CONFIG=/path/to/assetcore.toml.
+#
+# ${VAR} placeholders are expanded from the environment at load, so secrets
+# (API keys, DSNs) never live in the file or in version control.
+
+# --- storage repo: which AssetRepo backs the service (audit note #3) -----------
+[repos.main]
+provider = "sqlite"                 # one of: sqlite | postgres | memory
+[repos.main.config]
+path = "${ASSETCORE_SQLITE_PATH}"   # empty -> SqliteRepo falls back to :memory:
+# to move to Postgres, this block becomes:
+#   [repos.main]
+#   provider = "postgres"
+#   [repos.main.config]
+#   dsn = "${ASSETCORE_DSN}"
+
+# --- production tracker: a VIEW over identity (ShotGrid / Jira / ftrack) --------
+[trackers.production]
+provider = "shotgrid"               # which TrackerAdapter implementation
+[trackers.production.config]
+base_url    = "https://studio.shotgrid.autodesk.com"
+script_name = "assetcore"
+api_key     = "${SHOTGRID_API_KEY}"
+
+# to move to Jira, this whole block becomes:
+#   [trackers.production]
+#   provider = "jira"
+#   [trackers.production.config]
+#   base_url  = "https://studio.atlassian.net"
+#   project   = "PIPE"
+#   email     = "pipeline@studio.com"
+#   api_token = "${JIRA_API_TOKEN}"
+
+# --- source / runtime stores: DESCRIBED here for completeness ------------------
+# (Perforce/git resolvers still route through ResolverRegistry today; wiring them
+#  into this registry is a follow-up — see docs/PHASE7 "out of scope".)
+[source_vcs.main]
+provider = "perforce"
+[source_vcs.main.config]
+port = "perforce:1666"
+
+[runtime_store.main]
+provider = "unreal"
+[runtime_store.main.config]
+project_root = "/Game"
