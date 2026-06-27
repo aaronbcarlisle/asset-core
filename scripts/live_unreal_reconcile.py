@@ -90,3 +90,6 @@ try:
 except Exception:
     traceback.print_exc()
     print("LIVE_UNREAL_RESULT: FAIL", flush=True)
+    # exit non-zero so CI/automation sees the failure (the editor propagates a failed
+    # script run) instead of a misleading clean exit after a printed FAIL.
+    sys.exit(1)
