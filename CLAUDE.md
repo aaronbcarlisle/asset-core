@@ -4,6 +4,12 @@ Read automatically by Claude Code. Orients you on what this project is, the
 non-negotiable principles, the build plan, and how to extend without breaking the
 core idea.
 
+## IMPORTANT: Git Commit & PR Rules
+
+**NEVER add AI attribution to commits or PRs.** No "Co-Authored-By: Claude", no
+"Generated with Claude Code", no AI tool attribution of any kind. This is
+**absolute and non-negotiable**.
+
 ## Read these first, in order
 
 1. **`docs/ARCHITECTURE.md`** — THE BLUEPRINT. Empty directory -> finished product:
