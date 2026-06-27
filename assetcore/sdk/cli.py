@@ -45,70 +45,74 @@ def _rel_line(r: dict) -> str:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="assetcore", description="identity-first asset management")
-    p.add_argument("--url", default=DEFAULT_URL, help="service base url")
-    p.add_argument("--token", default=DEFAULT_TOKEN, help="auth token (maps to an authority)")
-    p.add_argument("--json", action="store_true", help="print raw service JSON")
+    # global flags live on a shared parent applied to the root AND every subparser,
+    # so `--url/--token/--json` work either before OR after the subcommand.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--url", default=DEFAULT_URL, help="service base url")
+    common.add_argument("--token", default=DEFAULT_TOKEN, help="auth token (maps to an authority)")
+    common.add_argument("--json", action="store_true", help="print raw service JSON")
+
+    p = argparse.ArgumentParser(prog="assetcore", parents=[common],
+                                description="identity-first asset management")
     sub = p.add_subparsers(dest="command", required=True)
 
-    g = sub.add_parser("resolve", help="show an asset's three facets")
+    def add(name, **kw):
+        return sub.add_parser(name, parents=[common], **kw)
+
+    g = add("resolve", help="show an asset's three facets")
     g.add_argument("asset_id")
 
-    g = sub.add_parser("declare", help="mint a provisional asset")
+    g = add("declare", help="mint a provisional asset")
     g.add_argument("--type", required=True, dest="asset_type")
     g.add_argument("--by", required=True, dest="created_by")
 
-    g = sub.add_parser("claim", help="give a provisional asset identity (production)")
+    g = add("claim", help="give a provisional asset identity (production)")
     g.add_argument("asset_id"); g.add_argument("--name", required=True)
     g.add_argument("--taxonomy", required=True); g.add_argument("--actor", required=True)
 
-    g = sub.add_parser("rename", help="relabel the identity facet only (production)")
+    g = add("rename", help="relabel the identity facet only (production)")
     g.add_argument("asset_id"); g.add_argument("--name", required=True)
     g.add_argument("--actor", required=True); g.add_argument("--taxonomy", default=None)
 
-    g = sub.add_parser("bind-source", help="publish the source facet (artist)")
+    g = add("bind-source", help="publish the source facet (artist)")
     g.add_argument("asset_id"); g.add_argument("location_uri")
     g.add_argument("--tool", required=True); g.add_argument("--rev", required=True, dest="revision")
     g.add_argument("--by", required=True, dest="published_by")
 
-    g = sub.add_parser("bind-runtime", help="report the runtime facet (engine/build)")
+    g = add("bind-runtime", help="report the runtime facet (engine/build)")
     g.add_argument("asset_id"); g.add_argument("location_uri"); g.add_argument("--build", required=True)
 
-    g = sub.add_parser("relate", help="assert a typed edge")
+    g = add("relate", help="assert a typed edge")
     g.add_argument("from_asset"); g.add_argument("to_asset"); g.add_argument("rel_type")
     g.add_argument("--mode", choices=["float", "pin"], default=None)
     g.add_argument("--pin", type=int, default=None, dest="pinned_version")
     g.add_argument("--actor", default=None)
 
-    g = sub.add_parser("relocate", help="move the bytes in place (same identity/version)")
+    g = add("relocate", help="move the bytes in place (same identity/version)")
     g.add_argument("asset_id"); g.add_argument("location_uri"); g.add_argument("--actor", required=True)
     g.add_argument("--facet", choices=["source", "runtime"], default="source")
     g.add_argument("--rev", default=None, dest="new_revision")
 
-    g = sub.add_parser("deprecate", help="retire an identity (production)")
+    g = add("deprecate", help="retire an identity (production)")
     g.add_argument("asset_id"); g.add_argument("--actor", required=True)
 
     for name, helptext in [("dependents", "what (transitively) depends on this asset"),
-                           ("dependencies", "what this asset is built from")]:
-        g = sub.add_parser(name, help=helptext)
+                           ("dependencies", "what this asset is built from"),
+                           ("impact", "alias for dependents (the 'what breaks' view)")]:
+        g = add(name, help=helptext)
         g.add_argument("asset_id")
         g.add_argument("--rel-types", default=None, dest="rel_types")
         g.add_argument("--depth", type=int, default=None)
-    g = sub.add_parser("impact", help="alias for dependents (the 'what breaks' view)")
-    g.add_argument("asset_id"); g.add_argument("--rel-types", default=None, dest="rel_types")
-    g.add_argument("--depth", type=int, default=None)
 
-    g = sub.add_parser("used-by", help="direct consumers (one hop)"); g.add_argument("asset_id")
-    g = sub.add_parser("lineage", help="what this derives from / instances"); g.add_argument("asset_id")
-    g = sub.add_parser("stale-derivations", help="DERIVED_FROM edges whose source advanced")
-    g.add_argument("asset_id")
-    g = sub.add_parser("floating", help="DEPENDS_ON edges still floating (pin before ship)")
-    g.add_argument("asset_id")
+    add("used-by", help="direct consumers (one hop)").add_argument("asset_id")
+    add("lineage", help="what this derives from / instances").add_argument("asset_id")
+    add("stale-derivations", help="DERIVED_FROM edges whose source advanced").add_argument("asset_id")
+    add("floating", help="DEPENDS_ON edges still floating (pin before ship)").add_argument("asset_id")
 
-    g = sub.add_parser("find-similar", help="reuse-over-rebuild nudge (advisory)")
+    g = add("find-similar", help="reuse-over-rebuild nudge (advisory)")
     g.add_argument("name"); g.add_argument("--type", default=None, dest="asset_type")
 
-    sub.add_parser("worklist", help="provisional backfill queue (oldest first)")
+    add("worklist", help="provisional backfill queue (oldest first)")
     return p
 
 

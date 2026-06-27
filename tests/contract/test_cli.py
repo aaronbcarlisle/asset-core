@@ -20,6 +20,16 @@ def call(client, *argv, capsys=None):
     return code, out
 
 
+def test_global_flags_work_after_subcommand(make_client, capsys):
+    # --json/--url/--token must be accepted in either position (before OR after the
+    # subcommand) — they live on a shared parent parser.
+    artist = make_client("artist-token")
+    aid = json.loads(call(artist, "declare", "--type", "prop", "--by", "amy", "--json",
+                          capsys=capsys)[1])["id"]
+    code, out = call(artist, "resolve", aid, "--json", capsys=capsys)   # flag after the id
+    assert code == 0 and json.loads(out)["id"] == aid
+
+
 def test_declare_resolve_relate_impact(make_client, capsys):
     artist = make_client("artist-token")
 
