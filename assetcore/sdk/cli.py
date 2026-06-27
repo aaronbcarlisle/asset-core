@@ -24,6 +24,7 @@ import json as _json
 import os
 import sys
 
+from assetcore.sdk import tools
 from assetcore.sdk.client import AssetcoreClient
 
 DEFAULT_URL = os.environ.get("ASSETCORE_URL", "http://127.0.0.1:8000")
@@ -121,6 +122,21 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("name"); g.add_argument("--type", default=None, dest="asset_type")
 
     add("worklist", help="provisional backfill queue (oldest first)")
+
+    # --- production tools: impact-previewed rename/relocate --------------------
+    g = add("move", help="rename + relocate an asset in one safe op (impact preview first)")
+    g.add_argument("asset_id"); g.add_argument("--actor", required=True)
+    g.add_argument("--name", default=None); g.add_argument("--taxonomy", default=None)
+    g.add_argument("--source", default=None, dest="source_uri")
+    g.add_argument("--source-rev", default=None, dest="source_rev")
+    g.add_argument("--runtime", default=None, dest="runtime_uri")
+    g.add_argument("--yes", action="store_true", help="apply (omit for preview only)")
+
+    g = add("relocate-prefix", help="directory move: remap a path prefix across assets")
+    g.add_argument("old_prefix"); g.add_argument("new_prefix")
+    g.add_argument("--ids", required=True, help="comma-separated asset ids")
+    g.add_argument("--actor", required=True)
+    g.add_argument("--yes", action="store_true", help="apply (omit for preview only)")
     return p
 
 
@@ -190,6 +206,32 @@ def run(args, client: AssetcoreClient) -> int:
         items = client.backfill_worklist()
         _out(args, items, f"{len(items)} provisional:\n" +
              "\n".join(f"  {i['asset_type']:<10} {i['id']}  ({i['created_by']})" for i in items))
+    elif cmd == "move":
+        report = tools.impact_report(client, args.asset_id)
+        lines = [f"impact: {report['total']} dependents by depth {report['by_depth']}"]
+        lines += [_node_line(n) for n in report["dependents"][:20]]
+        if not args.yes:
+            lines.append("  (preview only — re-run with --yes to apply)")
+            _out(args, {"preview": report}, "\n".join(lines))
+        else:
+            res = tools.rename_relocate(
+                client, args.asset_id, args.actor, new_name=args.name,
+                new_taxonomy=args.taxonomy, source_uri=args.source_uri,
+                source_rev=args.source_rev, runtime_uri=args.runtime_uri)
+            lines.append(f"  applied: changed {res['changed'] or '(nothing)'}")
+            _out(args, {"preview": report, "result": res}, "\n".join(lines))
+    elif cmd == "relocate-prefix":
+        ids = _csv(args.ids) or []
+        plan = tools.plan_prefix_moves(client, ids, args.old_prefix, args.new_prefix)
+        lines = [f"{len(plan['moves'])} to move, {len(plan['skipped'])} skipped:"]
+        lines += [f"  {m['from']} -> {m['to']}" for m in plan["moves"][:20]]
+        if not args.yes:
+            lines.append("  (preview only — re-run with --yes to apply)")
+            _out(args, {"plan": plan}, "\n".join(lines))
+        else:
+            res = tools.relocate_prefix(client, ids, args.old_prefix, args.new_prefix, args.actor)
+            lines.append(f"  applied: moved {res['moved']}, skipped {res['skipped']}")
+            _out(args, res, "\n".join(lines))
     else:   # pragma: no cover - argparse 'required' prevents this
         return 2
     return 0
