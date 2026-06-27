@@ -99,3 +99,5 @@ try:
     main()
 except Exception:
     flush("[live-max] FAIL\n" + traceback.format_exc())
+    # exit non-zero so a wrapper/CI sees the failure, not just the result file
+    sys.exit(1)
