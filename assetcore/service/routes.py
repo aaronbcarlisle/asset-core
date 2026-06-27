@@ -23,12 +23,20 @@ from assetcore.service.schemas import (
     AssetMetaOut,
     BindRuntimeRequest,
     BindSourceRequest,
+    BulkCountResponse,
+    BulkDeclareRequest,
+    BulkDeclareResponse,
+    BulkRelateRequest,
+    BulkRelocateRequest,
     ClaimRequest,
     DeclareRequest,
     DeclareResponse,
+    DeprecateRequest,
+    GraphNodeOut,
     IdentityOut,
     RelateRequest,
     RelationshipOut,
+    RelocateRequest,
     RenameRequest,
     ResolveResponse,
     RuntimeOut,
@@ -110,6 +118,29 @@ async def rename(asset_id: UUID, body: RenameRequest, service: AssetcoreService 
     return Response(status_code=204)
 
 
+@router.post("/assets/{asset_id}/relocate", status_code=204)
+async def relocate(asset_id: UUID, body: RelocateRequest,
+                   service: AssetcoreService = Depends(get_service),
+                   _: str = Depends(auth.get_authority)) -> Response:
+    """Move the BYTES (a p4 move / reorg): same identity + version + edges, new
+    location. Any authenticated authority; the actor is recorded."""
+    _require_asset(service, asset_id)
+    try:
+        service.relocate(asset_id, body.new_location_uri, body.actor, body.facet, body.new_revision)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return Response(status_code=204)
+
+
+@router.post("/assets/{asset_id}/deprecate", status_code=204)
+async def deprecate(asset_id: UUID, body: DeprecateRequest,
+                    service: AssetcoreService = Depends(get_service),
+                    _: str = Depends(auth.require(auth.PRODUCTION))) -> Response:
+    _require_asset(service, asset_id)
+    service.deprecate(asset_id, body.actor)
+    return Response(status_code=204)
+
+
 # --- facet binds ------------------------------------------------------------
 @router.post("/assets/{asset_id}/source", response_model=VersionResponse)
 async def bind_source(asset_id: UUID, body: BindSourceRequest,
@@ -172,6 +203,40 @@ async def lineage(asset_id: UUID, service: AssetcoreService = Depends(get_servic
     return [RelationshipOut.model_validate(r) for r in service.lineage(asset_id)]
 
 
+def _parse_rel_types(rel_types: str | None) -> list[str] | None:
+    return [t for t in rel_types.split(",") if t] if rel_types else None
+
+
+@router.get("/assets/{asset_id}/dependents", response_model=list[GraphNodeOut])
+async def dependents(asset_id: UUID, rel_types: str | None = None, depth: int | None = None,
+                     service: AssetcoreService = Depends(get_service)) -> list[GraphNodeOut]:
+    """Transitive impact: everything that depends on this asset (what breaks if I
+    change/rename/retire it). `rel_types` is comma-separated; `depth` bounds the walk."""
+    try:
+        reached = service.dependents(asset_id, _parse_rel_types(rel_types), depth)
+    except ValueError as exc:   # an invalid rel_types value -> 400, not 500
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [GraphNodeOut(asset_id=a, depth=d, rel_type=rt) for a, d, rt in reached]
+
+
+@router.get("/assets/{asset_id}/dependencies", response_model=list[GraphNodeOut])
+async def dependencies(asset_id: UUID, rel_types: str | None = None, depth: int | None = None,
+                       service: AssetcoreService = Depends(get_service)) -> list[GraphNodeOut]:
+    """Transitive: everything this asset is built from / depends on."""
+    try:
+        reached = service.dependencies(asset_id, _parse_rel_types(rel_types), depth)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [GraphNodeOut(asset_id=a, depth=d, rel_type=rt) for a, d, rt in reached]
+
+
+@router.get("/assets/{asset_id}/stale-derivations", response_model=list[RelationshipOut])
+async def stale_derivations(asset_id: UUID,
+                            service: AssetcoreService = Depends(get_service)) -> list[RelationshipOut]:
+    """DERIVED_FROM edges whose source advanced past the derive version (re-bake needed)."""
+    return [RelationshipOut.model_validate(r) for r in service.stale_derivations(asset_id)]
+
+
 # --- human surfaces (Phase 7) ----------------------------------------------
 @router.get("/similar", response_model=list[SimilarCandidate])
 async def find_similar(name: str, asset_type: str | None = None,
@@ -205,6 +270,38 @@ async def floating_dependencies(asset_id: UUID,
                                 service: AssetcoreService = Depends(get_service)) -> list[RelationshipOut]:
     """The float-footgun guard: DEPENDS_ON edges still floating before delivery."""
     return [RelationshipOut.model_validate(r) for r in service.floating_dependencies(asset_id)]
+
+
+# --- bulk (the 100s-of-assets reality) --------------------------------------
+@router.post("/bulk/declare", response_model=BulkDeclareResponse, status_code=201)
+async def bulk_declare(body: BulkDeclareRequest, service: AssetcoreService = Depends(get_service),
+                       _: str = Depends(auth.require(auth.ARTIST, auth.ENGINE))) -> BulkDeclareResponse:
+    ids = service.bulk_declare([s.model_dump() for s in body.specs])
+    return BulkDeclareResponse(ids=ids)
+
+
+@router.post("/bulk/relate", response_model=BulkCountResponse)
+async def bulk_relate(body: BulkRelateRequest, service: AssetcoreService = Depends(get_service),
+                      authority: str = Depends(auth.get_authority)) -> BulkCountResponse:
+    edges = [{"frm": e.from_asset, "to": e.to_asset, "rel_type": e.rel_type,
+              "actor": e.actor if e.actor is not None else authority,
+              "binding_mode": e.binding_mode, "pinned_version": e.pinned_version}
+             for e in body.edges]
+    try:
+        n = service.bulk_relate(edges)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return BulkCountResponse(count=n)
+
+
+@router.post("/bulk/relocate", response_model=BulkCountResponse)
+async def bulk_relocate(body: BulkRelocateRequest, service: AssetcoreService = Depends(get_service),
+                        _: str = Depends(auth.get_authority)) -> BulkCountResponse:
+    try:
+        n = service.bulk_relocate([m.model_dump() for m in body.moves])
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return BulkCountResponse(count=n)
 
 
 # --- the event spine --------------------------------------------------------

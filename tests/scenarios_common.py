@@ -174,6 +174,52 @@ def scenario_floating_dependencies_flags_footguns(repo, sink):
     assert [e.to_asset for e in floating] == [mat]    # only the un-pinned dep
 
 
+def scenario_environment_reuse_relocate_impact(repo, sink):
+    """Environment reality: a prop reused across nested envs, transitive impact, and
+    a directory relocate that keeps identity + every relationship intact."""
+    # city COMPOSED_OF district COMPOSED_OF barrel; barrel reused by a second district
+    barrel = verbs.declare(repo, sink, "prop", "amy")
+    verbs.bind_source(repo, sink, barrel, "//depot/art/props/barrel.ma", "maya", "10", "amy")
+    verbs.claim(repo, sink, barrel, "Barrel", "props/barrel", "pat")
+    city = verbs.declare(repo, sink, "set", "amy")
+    district_a = verbs.declare(repo, sink, "set", "amy")
+    district_b = verbs.declare(repo, sink, "set", "amy")
+    verbs.relate(repo, sink, city, district_a, RelType.COMPOSED_OF, "amy")
+    verbs.relate(repo, sink, city, district_b, RelType.COMPOSED_OF, "amy")
+    verbs.relate(repo, sink, district_a, barrel, RelType.COMPOSED_OF, "amy")
+    verbs.relate(repo, sink, district_b, barrel, RelType.COMPOSED_OF, "amy")  # reuse, not copy
+
+    # transitive impact of the barrel reaches both districts + the city (depths 1 and 2)
+    impacted = {a: d for a, d, _rt in verbs.dependents(repo, barrel)}
+    assert impacted == {district_a: 1, district_b: 1, city: 2}
+
+    # art reorg: relocate the barrel's bytes — identity, name, and all edges survive
+    verbs.relocate(repo, sink, barrel, "//depot/art/env/props/barrel.ma", "pat", new_revision="55")
+    src = next(v for v in repo.source_versions(barrel) if v.is_latest)
+    assert src.location_uri == "//depot/art/env/props/barrel.ma" and src.revision == "55"
+    assert len(repo.source_versions(barrel)) == 1                       # a move, not a new version
+    assert verbs.resolve(repo, barrel)["identity"].display_name == "Barrel"
+    assert {a for a, _d, _rt in verbs.dependents(repo, barrel)} == {district_a, district_b, city}
+
+
+def scenario_derivation_staleness_and_deprecate(repo, sink):
+    """A bake goes stale when its high-poly is re-sculpted; a superseded asset is
+    deprecated without losing its facets or its consumers."""
+    hi = verbs.declare(repo, sink, "sculpt", "amy")
+    verbs.bind_source(repo, sink, hi, "//depot/hi.ztl", "zbrush", "1", "amy")
+    low = verbs.declare(repo, sink, "mesh", "amy")
+    verbs.relate(repo, sink, low, hi, RelType.DERIVED_FROM, "amy")
+    assert verbs.stale_derivations(repo, low) == []                     # fresh bake
+
+    verbs.bind_source(repo, sink, hi, "//depot/hi.ztl", "zbrush", "2", "amy")   # re-sculpt
+    stale = verbs.stale_derivations(repo, low)
+    assert len(stale) == 1 and stale[0].to_asset == hi                  # bake now stale
+
+    verbs.deprecate(repo, sink, low, "pat")
+    assert verbs.resolve(repo, low)["meta"].lifecycle == Lifecycle.DEPRECATED
+    assert verbs.lineage(repo, low)[0].to_asset == hi                   # edges preserved
+
+
 def spine_records_declares_and_writes(repo, sink):
     a = verbs.declare(repo, sink, "prop", "env_amy")
     verbs.bind_source(repo, sink, a, "//depot/props/barrel.ma", "maya", 4101, "env_amy")
@@ -196,5 +242,7 @@ ALL_SCENARIOS = [
     scenario_find_similar_nudges_reuse,
     scenario_backfill_worklist_lists_only_provisional,
     scenario_floating_dependencies_flags_footguns,
+    scenario_environment_reuse_relocate_impact,
+    scenario_derivation_staleness_and_deprecate,
     spine_records_declares_and_writes,
 ]

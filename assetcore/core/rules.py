@@ -9,6 +9,7 @@ If you are tempted to pass a repo into one of these, the logic belongs in
 app/verbs.py instead — that is the boundary this module defends.
 """
 import re
+from collections import deque
 
 from .entities import Asset, IdentityFacet, Relationship, SourceVersion
 from .types import BindingMode, RelType
@@ -77,6 +78,43 @@ def floating_dependencies(edges: list[Relationship]) -> list[Relationship]:
         e for e in edges
         if e.rel_type == RelType.DEPENDS_ON and e.binding_mode != BindingMode.PIN
     ]
+
+
+def walk_closure(start, neighbors, max_depth=None):
+    """Breadth-first transitive closure — the pure graph brain.
+
+    `neighbors(node) -> iterable of (next_node, label)`. Returns a list of
+    (node, depth, label) in BFS order, EXCLUDING the start. Cycle-safe (each node
+    visited once) and depth-bounded (max_depth=None is unbounded). The verbs wire
+    `neighbors` to repo.edges_to (dependents) or repo.edges_from (dependencies);
+    the algorithm itself stays repo-free and unit-testable.
+    """
+    seen = {start}
+    frontier = deque([(start, 0)])   # true FIFO: O(1) dequeue (BFS stays O(V+E))
+    reached = []
+    while frontier:
+        node, depth = frontier.popleft()
+        if max_depth is not None and depth >= max_depth:
+            continue
+        for nxt, label in neighbors(node):
+            if nxt in seen:
+                continue          # already reached by a shorter/equal path; skip (cycle-safe)
+            seen.add(nxt)
+            reached.append((nxt, depth + 1, label))
+            frontier.append((nxt, depth + 1))
+    return reached
+
+
+def derivation_is_stale(derived_at_version: int | None,
+                        current_latest_version: int | None) -> bool:
+    """A DERIVED_FROM child is stale when its source advanced past the version it
+    was derived at (e.g. a bake whose high-poly was re-sculpted). Unknown bounds
+    (a legacy edge with no recorded derive version, or a source with no versions)
+    are NOT flagged — staleness must be certain, never guessed.
+    """
+    if derived_at_version is None or current_latest_version is None:
+        return False
+    return current_latest_version > derived_at_version
 
 
 def _tokens(text: str | None) -> set[str]:

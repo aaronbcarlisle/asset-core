@@ -71,6 +71,32 @@ class AssetcoreService:
     def floating_dependencies(self, asset_id: UUID) -> list[Relationship]:
         return verbs.floating_dependencies(self.repo, asset_id)
 
+    # --- pipeline graph + lifecycle + bulk (Phase 11) ---
+    def dependents(self, asset_id: UUID, rel_types=None, max_depth: int | None = None) -> list[tuple]:
+        return verbs.dependents(self.repo, asset_id, rel_types, max_depth)
+
+    def dependencies(self, asset_id: UUID, rel_types=None, max_depth: int | None = None) -> list[tuple]:
+        return verbs.dependencies(self.repo, asset_id, rel_types, max_depth)
+
+    def relocate(self, asset_id: UUID, new_location_uri: str, actor: str,
+                 facet: str = "source", new_revision: str | None = None) -> None:
+        verbs.relocate(self.repo, self.sink, asset_id, new_location_uri, actor, facet, new_revision)
+
+    def deprecate(self, asset_id: UUID, actor: str) -> None:
+        verbs.deprecate(self.repo, self.sink, asset_id, actor)
+
+    def stale_derivations(self, asset_id: UUID) -> list[Relationship]:
+        return verbs.stale_derivations(self.repo, asset_id)
+
+    def bulk_declare(self, specs: list[dict]) -> list[UUID]:
+        return verbs.bulk_declare(self.repo, self.sink, specs)
+
+    def bulk_relate(self, edges: list[dict]) -> int:
+        return verbs.bulk_relate(self.repo, self.sink, edges)
+
+    def bulk_relocate(self, moves: list[dict]) -> int:
+        return verbs.bulk_relocate(self.repo, self.sink, moves)
+
     def metrics(self, now: datetime) -> dict:
         # NOTE: per-asset source/runtime lookups are O(n) round-trips on SQL
         # backends. Acceptable for now (scrape interval >> asset churn); a

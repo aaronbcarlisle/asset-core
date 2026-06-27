@@ -142,6 +142,18 @@ class PostgresRepo:
                  v.is_latest, v.published_at, v.published_by),
             )
 
+    def update_source_location(self, asset_id: UUID, new_location_uri: str,
+                               new_revision: str | None = None) -> bool:
+        with self.conn, self.conn.cursor() as cur:   # in-place move of the latest version
+            if new_revision is None:
+                cur.execute("UPDATE facet_source_version SET location_uri=%s"
+                            " WHERE asset_id=%s AND is_latest", (new_location_uri, asset_id))
+            else:
+                cur.execute("UPDATE facet_source_version SET location_uri=%s, revision=%s"
+                            " WHERE asset_id=%s AND is_latest",
+                            (new_location_uri, str(new_revision), asset_id))
+            return cur.rowcount > 0
+
     def source_versions(self, asset_id: UUID) -> list[SourceVersion]:
         rows = self._all(
             "SELECT * FROM facet_source_version WHERE asset_id=%s ORDER BY version_num", (asset_id,))
@@ -166,6 +178,12 @@ class PostgresRepo:
                 " VALUES (%s, %s, %s, %s, %s, %s)",
                 (v.asset_id, v.location_uri, v.build_id, v.version_num, v.is_latest, v.cooked_at),
             )
+
+    def update_runtime_location(self, asset_id: UUID, new_location_uri: str) -> bool:
+        with self.conn, self.conn.cursor() as cur:
+            cur.execute("UPDATE facet_runtime_version SET location_uri=%s"
+                        " WHERE asset_id=%s AND is_latest", (new_location_uri, asset_id))
+            return cur.rowcount > 0
 
     def runtime_versions(self, asset_id: UUID) -> list[RuntimeVersion]:
         rows = self._all(

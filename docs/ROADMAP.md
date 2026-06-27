@@ -174,6 +174,29 @@ state — never build for weeks without something to smoke-test.
       key, unset-required-env vs empty-optional-env, capability scoping, aggregation,
       script exit codes). Firewall still **3 kept / 0 broken**.
 
+## Phase 11 — Pipeline foundation (the graph math + Concept Art)  ✅
+Grounded in `docs/PIPELINE_MODEL.md` (real game-dev disciplines → the model). The
+relationship vocab + per-edge FLOAT/PIN already cover selective master-update
+propagation; this adds the graph/lifecycle/relocate capability the env + animation
+workflows need.
+- [x] `rules.walk_closure` (BFS, cycle-safe, depth-bounded) + `derivation_is_stale`
+      — pure. `verbs.dependents` / `dependencies` — transitive impact closures.
+- [x] `verbs.relocate` (+ `update_source/runtime_location` on all 3 repos) — move
+      the BYTES in place (p4 move / directory reorg): same identity, same version,
+      edges intact; NOT a content version. `bulk_relocate` for directory-scale moves.
+- [x] `verbs.deprecate` (Lifecycle.DEPRECATED, facets/edges preserved);
+      `verbs.stale_derivations` (+ `relate` anchors DERIVED_FROM with the derive
+      version) → flags bakes whose high-poly was re-sculpted.
+- [x] `bulk_declare` / `bulk_relate` / `bulk_relocate` — the 100s-of-assets reality.
+- [x] All exposed over the service + SDK (dependents/dependencies/stale-derivations
+      GETs; relocate/deprecate/bulk POSTs).
+- [x] `integrations/photoshop.py` — Concept Art (front of pipeline) as a DCC adapter
+      (.psd XMP stamp seam); passes the identical DCC contract (6 tests × 7 adapters).
+- [x] Tests: 12 unit + 2 cross-backend scenarios + 5 HTTP-endpoint. **187 passed**;
+      firewall **3 kept / 0 broken**.
+- **Next:** prove the environment + animation workflows at scale on this foundation,
+      then the agnostic toolset (CLI first); live `.psd` publish when Photoshop installs.
+
 ---
 
 ## Status: phases 1–10 complete

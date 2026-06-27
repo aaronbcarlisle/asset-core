@@ -74,6 +74,16 @@ class InMemoryRepo:
             key=lambda v: v.version_num,
         )
 
+    def update_source_location(self, asset_id: UUID, new_location_uri: str,
+                               new_revision: str | None = None) -> bool:
+        latest = next((v for v in self.source_versions(asset_id) if v.is_latest), None)
+        if latest is None:
+            return False
+        latest.location_uri = new_location_uri
+        if new_revision is not None:
+            latest.revision = str(new_revision)
+        return True
+
     # --- runtime facet ---
     def add_runtime_version(self, v: RuntimeVersion) -> None:
         self._require_asset(v.asset_id)
@@ -85,6 +95,13 @@ class InMemoryRepo:
             (v for v in self.runtimes if v.asset_id == asset_id),
             key=lambda v: v.version_num,
         )
+
+    def update_runtime_location(self, asset_id: UUID, new_location_uri: str) -> bool:
+        latest = next((v for v in self.runtime_versions(asset_id) if v.is_latest), None)
+        if latest is None:
+            return False
+        latest.location_uri = new_location_uri
+        return True
 
     # --- relationships ---
     def add_relationship(self, r: Relationship) -> None:
