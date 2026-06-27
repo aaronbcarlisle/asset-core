@@ -6,7 +6,12 @@ registry).
 """
 import pytest
 
-from assetcore.sdk.resolvers import LocalFileResolver, ResolverRegistry
+from assetcore.sdk.resolvers import (
+    LocalFileResolver,
+    PerforceResolver,
+    ResolverRegistry,
+    default_registry,
+)
 
 
 class _StubResolver:
@@ -45,3 +50,34 @@ def test_local_file_resolver_missing_raises(tmp_path):
     reg.register("file://", LocalFileResolver())
     with pytest.raises(FileNotFoundError):
         reg.fetch(f"file://{tmp_path / 'nope.ma'}")
+
+
+def test_perforce_resolver_builds_sync_then_where():
+    """The p4 command construction is verified via an injected runner (no server)."""
+    calls = []
+
+    def fake_runner(args):
+        calls.append(args)
+        if args[:2] == ["p4", "sync"]:
+            return ""
+        if "where" in args:
+            return "//depot/art/barrel.ma /ws/art/barrel.ma /local/art/barrel.ma\n"
+        return ""
+
+    # the default %path% format makes `where` return just the local path:
+    def fake_runner_pathonly(args):
+        calls.append(args)
+        return "" if args[:2] == ["p4", "sync"] else "/local/art/barrel.ma\n"
+
+    resolver = PerforceResolver(runner=fake_runner_pathonly)
+    local = resolver.fetch("//depot/art/barrel.ma@4101")
+
+    assert local == "/local/art/barrel.ma"
+    assert calls[0] == ["p4", "sync", "//depot/art/barrel.ma@4101"]   # synced with @CL
+    assert calls[1] == ["p4", "-F", "%path%", "where", "//depot/art/barrel.ma"]  # @CL stripped
+
+
+def test_default_registry_routes_depot_and_file():
+    reg = default_registry()
+    assert reg.for_uri("//depot/x.ma").__class__ is PerforceResolver
+    assert reg.for_uri("file:///tmp/x.ma").__class__ is LocalFileResolver

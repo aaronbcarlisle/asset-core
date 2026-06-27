@@ -70,12 +70,22 @@ state — never build for weeks without something to smoke-test.
 - **Done when:** integration shape proven with no real tool installed. ✅ 20
   contract tests green; the definition of "a correct adapter" is now executable.
 
-## Phase 5 — First real DCC + engine
-- [ ] `integrations/maya.py` (DCCAdapter), `integrations/unreal.py` (EngineAdapter)
-- [ ] `PerforceResolver`
-- [ ] Same contract suite green inside Maya/Unreal (headless where possible)
-- **Done when:** barrel goes Maya -> Perforce -> Unreal; "Open Source" in editor
-  lands on the real .ma. The end-to-end milestone.
+## Phase 5 — First real DCC + engine  ✅ (real-iron run gated)
+- [x] `integrations/maya.py` (MayaAdapter / DCCAdapter), `integrations/unreal.py`
+      (UnrealAdapter / EngineAdapter) — real code, lazy tool imports + injectable
+      seams (maya.cmds / unreal.EditorAssetLibrary / p4), reshaped from the
+      prototype stubs per Appendix A.
+- [x] `PerforceResolver` (sdk/resolvers.py) with injectable runner + default_registry
+- [x] **Same contract suite green against the real adapters** here, via faithful
+      fakes of the tool APIs: MayaAdapter passes the DCC contract, UnrealAdapter
+      the engine contract. Integrations-import-firewall test added.
+- [~] Inside real Maya/Unreal/P4: gated tests in tests/integration/
+      test_real_tools_gated.py — **skip** in this environment (no DCC/engine/p4
+      installed), run on real iron. The literal end-to-end (Maya -> P4 -> Unreal,
+      "Open Source" -> real .ma) needs that software and a live P4 depot.
+- **Done when:** barrel goes Maya -> Perforce -> Unreal; "Open Source" lands on
+  the real .ma. Adapter conformance proven here; the on-iron run is the remaining
+  step, gated and ready.
 
 ## Phase 6 — The swap test (proof of decoupling)
 - [ ] `integrations/blender.py`, `integrations/substance.py` — core untouched

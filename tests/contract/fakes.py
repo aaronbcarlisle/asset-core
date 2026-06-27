@@ -77,6 +77,59 @@ class FakeSidecarDCCAdapter(SidecarStampMixin, DCCAdapter):
         return "r1"
 
 
+# --- faithful fakes of the real tool APIs (so the REAL adapters run headless) --
+class FakeMayaScene:
+    """Models maya.cmds scene state: a current file + per-file fileInfo dicts."""
+
+    def __init__(self) -> None:
+        self._scenes: dict[str, dict[str, str]] = {}
+        self._current: str | None = None
+
+    def open_or_new(self, path: str) -> None:
+        self._scenes.setdefault(path, {})
+        self._current = path
+
+    def file_info_get(self, key: str) -> str | None:
+        return self._scenes[self._current].get(key)
+
+    def file_info_set(self, key: str, value: str) -> None:
+        self._scenes[self._current][key] = value
+
+
+class FakeMayaVcs:
+    """Models the P4 workspace mapping: local path -> depot path + revision."""
+
+    def depot_path(self, local_path: str) -> str:
+        return f"//depot{local_path}"
+
+    def revision(self, local_path: str) -> str:
+        return "cl1"
+
+
+class FakeUnrealEditor:
+    """Models unreal.EditorAssetLibrary: metadata tags + an asset listing."""
+
+    def __init__(self) -> None:
+        self._meta: dict[str, dict[str, str]] = {}
+        self._assets: list[str] = []
+
+    def create_asset(self, asset_path: str) -> None:
+        self._assets.append(asset_path)
+        self._meta.setdefault(asset_path, {})
+
+    def get_metadata(self, asset_path: str, tag: str) -> str | None:
+        return self._meta.get(asset_path, {}).get(tag)
+
+    def set_metadata(self, asset_path: str, tag: str, value: str) -> None:
+        self._meta.setdefault(asset_path, {})[tag] = value
+
+    def save(self, asset_path: str) -> None:
+        pass
+
+    def list_assets(self) -> list[str]:
+        return list(self._assets)
+
+
 class FakeEngineAdapter(EngineAdapter):
     """Stamps engine assets in a dict; list_assets returns whatever was added."""
 

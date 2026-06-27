@@ -8,13 +8,23 @@ from uuid import uuid4
 
 import pytest
 
+from assetcore.integrations.maya import MayaAdapter
 from assetcore.sdk.stamping import StampConflict
-from tests.contract.fakes import FakeDCCAdapter, FakeSidecarDCCAdapter
+from tests.contract.fakes import (
+    FakeDCCAdapter,
+    FakeMayaVcs,
+    FakeMayaScene,
+    FakeSidecarDCCAdapter,
+)
 
 # (id, builder(make_client, tmp_path) -> adapter). The artist authority owns source.
+# The REAL MayaAdapter runs the IDENTICAL suite via faithful fakes of maya.cmds +
+# the p4 workspace — the Part-5 thesis, exercised here without Maya installed.
 DCC_ADAPTERS = [
     pytest.param(lambda mk, tmp: FakeDCCAdapter(mk("artist-token")), id="dict-stamp"),
     pytest.param(lambda mk, tmp: FakeSidecarDCCAdapter(mk("artist-token"), tmp), id="sidecar-stamp"),
+    pytest.param(lambda mk, tmp: MayaAdapter(mk("artist-token"), scene=FakeMayaScene(),
+                                             vcs=FakeMayaVcs()), id="maya"),
 ]
 
 
