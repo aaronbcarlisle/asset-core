@@ -44,27 +44,42 @@ def rename_relocate(client: AssetcoreClient, asset_id: str, actor: str, *,
     if source_uri is not None:
         client.relocate(asset_id, source_uri, actor, facet="source", new_revision=source_rev)
         changed.append("source")
+    elif source_rev is not None:
+        # revision-only update: keep the current location, change just the revision
+        cur = (client.resolve(asset_id).get("source") or {}).get("location_uri")
+        if cur is not None:
+            client.relocate(asset_id, cur, actor, facet="source", new_revision=source_rev)
+            changed.append("source")
     if runtime_uri is not None:
         client.relocate(asset_id, runtime_uri, actor, facet="runtime")
         changed.append("runtime")
-    if new_name is not None:
-        client.rename(asset_id, new_name, actor, new_taxonomy)
+    if new_name is not None or new_taxonomy is not None:
+        # rename needs a display name; a taxonomy-only change keeps the current name
+        name = new_name if new_name is not None else \
+            (client.resolve(asset_id).get("identity") or {}).get("display_name")
+        if name is None:
+            raise ValueError("a taxonomy change needs a display name (asset has none yet)")
+        client.rename(asset_id, name, actor, new_taxonomy)
         changed.append("identity")
     return {"asset_id": asset_id, "changed": changed}
 
 
 def plan_prefix_moves(client: AssetcoreClient, asset_ids, old_prefix: str,
                       new_prefix: str) -> dict:
-    """Plan a directory move: for each asset whose source location starts with
-    `old_prefix`, compute the new location by swapping the prefix. Pure preview —
-    nothing is written. Returns {moves: [...], skipped: [...]}."""
+    """Plan a directory move: for each asset whose source location is UNDER
+    `old_prefix` (a directory boundary — `//depot/art/props` does NOT match
+    `//depot/art/props2`), compute the new location by swapping the prefix. Pure
+    preview — nothing is written. Returns {moves: [...], skipped: [...]}."""
+    # normalize to a trailing slash so matching is at a path-segment boundary
+    old_dir = old_prefix if old_prefix.endswith("/") else old_prefix + "/"
+    new_dir = new_prefix if new_prefix.endswith("/") else new_prefix + "/"
     moves, skipped = [], []
     for aid in asset_ids:
         src = client.resolve(aid).get("source")
-        if not src or not src["location_uri"].startswith(old_prefix):
+        if not src or not src["location_uri"].startswith(old_dir):
             skipped.append(aid)
             continue
-        new_uri = new_prefix + src["location_uri"][len(old_prefix):]
+        new_uri = new_dir + src["location_uri"][len(old_dir):]
         moves.append({"asset_id": aid, "from": src["location_uri"], "to": new_uri})
     return {"moves": moves, "skipped": skipped}
 

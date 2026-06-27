@@ -179,3 +179,35 @@ def test_cli_relocate_prefix_preview_then_apply(make_client, capsys):
                      "--actor", "pat", "--yes", capsys=capsys)
     assert code == 0 and "moved 2" in out
     assert artist.resolve(ids[0])["source"]["location_uri"] == "//depot/new/p0.ma"
+
+
+def test_prefix_move_respects_directory_boundary(make_client):
+    # //depot/art/props2 must NOT match the prefix //depot/art/props (sibling path)
+    artist, prod = make_client("artist-token"), make_client("prod-token")
+    inside = artist.declare("prop", "amy")
+    artist.bind_source(inside, "//depot/art/props/x.ma", "maya", "1", "amy")
+    sibling = artist.declare("prop", "amy")
+    artist.bind_source(sibling, "//depot/art/props2/y.ma", "maya", "1", "amy")
+
+    res = tools.relocate_prefix(prod, [inside, sibling], "//depot/art/props",
+                                "//depot/art/env/props", "pat")
+    assert res["moved"] == 1 and res["skipped"] == 1
+    assert artist.resolve(inside)["source"]["location_uri"] == "//depot/art/env/props/x.ma"
+    assert artist.resolve(sibling)["source"]["location_uri"] == "//depot/art/props2/y.ma"   # untouched
+
+
+def test_taxonomy_only_and_revision_only_moves(make_client):
+    artist, prod = make_client("artist-token"), make_client("prod-token")
+    aid = artist.declare("prop", "amy")
+    artist.bind_source(aid, "//depot/x.ma", "maya", "1", "amy")
+    prod.claim(aid, "Keepname", "props/old", "pat")
+
+    # taxonomy-only: name preserved, taxonomy updated
+    tools.rename_relocate(prod, aid, "pat", new_taxonomy="props/new")
+    r = prod.resolve(aid)["identity"]
+    assert r["display_name"] == "Keepname" and r["taxonomy"] == "props/new"
+
+    # revision-only: location preserved, revision updated
+    tools.rename_relocate(prod, aid, "pat", source_rev="42")
+    s = prod.resolve(aid)["source"]
+    assert s["location_uri"] == "//depot/x.ma" and s["revision"] == "42" and s["version_num"] == 1
