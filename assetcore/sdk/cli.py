@@ -24,7 +24,7 @@ import json as _json
 import os
 import sys
 
-from assetcore.sdk import tools
+from assetcore.sdk import automation, tools
 from assetcore.sdk.client import AssetcoreClient
 
 DEFAULT_URL = os.environ.get("ASSETCORE_URL", "http://127.0.0.1:8000")
@@ -137,6 +137,15 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--ids", required=True, help="comma-separated asset ids")
     g.add_argument("--actor", required=True)
     g.add_argument("--yes", action="store_true", help="apply (omit for preview only)")
+
+    # --- artist + automation helpers ------------------------------------------
+    g = add("open-source", help="resolve an asset's authored source (optionally fetch it)")
+    g.add_argument("asset_id")
+    g.add_argument("--fetch", action="store_true", help="materialize locally via the resolver")
+
+    g = add("subscribe", help="tail the event spine (SSE)")
+    g.add_argument("--after", type=int, default=0, dest="after_seq")
+    g.add_argument("--limit", type=int, default=None, help="stop after N events")
     return p
 
 
@@ -232,6 +241,27 @@ def run(args, client: AssetcoreClient) -> int:
             res = tools.relocate_prefix(client, ids, args.old_prefix, args.new_prefix, args.actor)
             lines.append(f"  applied: moved {res['moved']}, skipped {res['skipped']}")
             _out(args, res, "\n".join(lines))
+    elif cmd == "open-source":
+        uri = tools.source_location(client, args.asset_id)
+        if uri is None:
+            _out(args, {"source": None}, "  (no source facet)")
+        elif args.fetch:
+            local = tools.fetch_source(client, args.asset_id)
+            _out(args, {"source": uri, "local": local}, f"{uri}\n  -> {local}")
+        else:
+            _out(args, {"source": uri}, uri)
+    elif cmd == "subscribe":
+        url, token = getattr(args, "url", DEFAULT_URL), getattr(args, "token", DEFAULT_TOKEN)
+        n = 0
+        for ev in automation.stream_events(url, token, args.after_seq):
+            if getattr(args, "json", False):
+                print(_json.dumps(ev))
+            else:
+                print(f"  [{ev.get('seq')}] {ev.get('event_type', ''):<22} "
+                      f"{ev.get('asset_id')}  {ev.get('payload')}")
+            n += 1
+            if args.limit and n >= args.limit:
+                break
     else:   # pragma: no cover - argparse 'required' prevents this
         return 2
     return 0

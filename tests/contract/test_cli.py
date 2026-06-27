@@ -211,3 +211,13 @@ def test_taxonomy_only_and_revision_only_moves(make_client):
     tools.rename_relocate(prod, aid, "pat", source_rev="42")
     s = prod.resolve(aid)["source"]
     assert s["location_uri"] == "//depot/x.ma" and s["revision"] == "42" and s["version_num"] == 1
+
+
+def test_cli_open_source(make_client, capsys):
+    artist = make_client("artist-token")
+    aid = json.loads(call(artist, "--json", "declare", "--type", "prop", "--by", "amy",
+                          capsys=capsys)[1])["id"]
+    call(artist, "bind-source", aid, "//depot/art/x.ma", "--tool", "maya", "--rev", "1",
+         "--by", "amy", capsys=capsys)
+    code, out = call(artist, "open-source", aid, capsys=capsys)
+    assert code == 0 and "//depot/art/x.ma" in out
