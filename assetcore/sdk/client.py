@@ -117,3 +117,49 @@ class AssetcoreClient:
 
     def floating_dependencies(self, asset_id: str) -> list[dict]:
         return self._get(f"/assets/{asset_id}/floating-dependencies").json()
+
+    # --- pipeline graph + lifecycle + bulk (Phase 16) ---
+    def dependents(self, asset_id: str, rel_types: list[str] | None = None,
+                   depth: int | None = None) -> list[dict]:
+        """Transitive impact: what (transitively) depends on this asset."""
+        params: dict[str, Any] = {}
+        if rel_types:
+            params["rel_types"] = ",".join(rel_types)
+        if depth is not None:
+            params["depth"] = depth
+        return self._get(f"/assets/{asset_id}/dependents", params).json()
+
+    def dependencies(self, asset_id: str, rel_types: list[str] | None = None,
+                     depth: int | None = None) -> list[dict]:
+        """Transitive: what this asset is built from / depends on."""
+        params: dict[str, Any] = {}
+        if rel_types:
+            params["rel_types"] = ",".join(rel_types)
+        if depth is not None:
+            params["depth"] = depth
+        return self._get(f"/assets/{asset_id}/dependencies", params).json()
+
+    def stale_derivations(self, asset_id: str) -> list[dict]:
+        return self._get(f"/assets/{asset_id}/stale-derivations").json()
+
+    def relocate(self, asset_id: str, new_location_uri: str, actor: str,
+                 facet: str = "source", new_revision: str | None = None) -> None:
+        self._post(f"/assets/{asset_id}/relocate", {
+            "new_location_uri": new_location_uri, "actor": actor,
+            "facet": facet, "new_revision": new_revision,
+        })
+
+    def deprecate(self, asset_id: str, actor: str) -> None:
+        self._post(f"/assets/{asset_id}/deprecate", {"actor": actor})
+
+    def bulk_declare(self, specs: list[dict]) -> list[str]:
+        """specs: [{asset_type, created_by, origin?}, ...] -> minted ids."""
+        return self._post("/bulk/declare", {"specs": specs}).json()["ids"]
+
+    def bulk_relate(self, edges: list[dict]) -> int:
+        """edges: [{from_asset, to_asset, rel_type, actor?, binding_mode?, pinned_version?}, ...]."""
+        return self._post("/bulk/relate", {"edges": edges}).json()["count"]
+
+    def bulk_relocate(self, moves: list[dict]) -> int:
+        """moves: [{asset_id, new_location_uri, actor, facet?, new_revision?}, ...]."""
+        return self._post("/bulk/relocate", {"moves": moves}).json()["count"]

@@ -59,6 +59,37 @@ class SetBindingRequest(BaseModel):
     pinned_version: int | None = None
 
 
+class RelocateRequest(BaseModel):
+    new_location_uri: str
+    actor: str
+    facet: str = "source"          # 'source' | 'runtime'
+    new_revision: str | None = None
+
+
+class DeprecateRequest(BaseModel):
+    actor: str
+
+
+class BulkDeclareRequest(BaseModel):
+    specs: list[DeclareRequest]
+
+
+class BulkRelateRequest(BaseModel):
+    edges: list[RelateRequest]
+
+
+class BulkRelocateItem(BaseModel):
+    asset_id: UUID
+    new_location_uri: str
+    actor: str
+    facet: str = "source"
+    new_revision: str | None = None
+
+
+class BulkRelocateRequest(BaseModel):
+    moves: list[BulkRelocateItem]
+
+
 # --- responses --------------------------------------------------------------
 class DeclareResponse(BaseModel):
     id: UUID
@@ -135,3 +166,18 @@ class WorklistItem(BaseModel):
     created_at: str
     origin: dict
     display_name: str | None
+
+
+class GraphNodeOut(BaseModel):
+    """A node reached by a transitive dependents/dependencies walk."""
+    asset_id: UUID
+    depth: int
+    rel_type: RelType
+
+
+class BulkDeclareResponse(BaseModel):
+    ids: list[UUID]
+
+
+class BulkCountResponse(BaseModel):
+    count: int
