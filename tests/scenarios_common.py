@@ -129,6 +129,45 @@ def invariant_single_latest_source_version(repo, sink):
     assert len(latest) == 1 and latest[0].version_num == 3
 
 
+def scenario_find_similar_nudges_reuse(repo, sink):
+    b1 = verbs.declare(repo, sink, "prop", "amy")
+    verbs.claim(repo, sink, b1, "Weathered Barrel", "props/containers/barrel", "pat")
+    b2 = verbs.declare(repo, sink, "prop", "ben")
+    verbs.claim(repo, sink, b2, "Mossy Barrel", "props/containers/barrel", "pat")
+    crate = verbs.declare(repo, sink, "prop", "amy")
+    verbs.claim(repo, sink, crate, "Wooden Crate", "props/containers/crate", "pat")
+
+    hits = verbs.find_similar(repo, "barrel", asset_type="prop")
+    ids = [asset.id for asset, _identity, _score in hits]
+    assert b1 in ids and b2 in ids        # both barrels surface
+    assert crate not in ids               # the crate does not (advisory, not a guess)
+
+
+def scenario_backfill_worklist_lists_only_provisional(repo, sink):
+    pending = verbs.declare(repo, sink, "prop", "amy", {"declared_while_on": "ship"})
+    claimed = verbs.declare(repo, sink, "prop", "ben")
+    verbs.claim(repo, sink, claimed, "Named", "props/x", "pat")
+
+    work = verbs.backfill_worklist(repo)
+    ids = [asset.id for asset, _identity in work]
+    assert pending in ids and claimed not in ids
+    # birth context is carried so the queue is groomable, not a mystery
+    item = next(a for a, _ in work if a.id == pending)
+    assert item.origin == {"declared_while_on": "ship"}
+
+
+def scenario_floating_dependencies_flags_footguns(repo, sink):
+    anim = verbs.declare(repo, sink, "anim", "lee")
+    mat = verbs.declare(repo, sink, "material", "mo")
+    tex = verbs.declare(repo, sink, "texture", "mo")
+    verbs.relate(repo, sink, anim, mat, RelType.DEPENDS_ON, "lee", binding_mode=BindingMode.FLOAT)
+    verbs.relate(repo, sink, anim, tex, RelType.DEPENDS_ON, "lee",
+                 binding_mode=BindingMode.PIN, pinned_version=1)
+
+    floating = verbs.floating_dependencies(repo, anim)
+    assert [e.to_asset for e in floating] == [mat]    # only the un-pinned dep
+
+
 def spine_records_declares_and_writes(repo, sink):
     a = verbs.declare(repo, sink, "prop", "env_amy")
     verbs.bind_source(repo, sink, a, "//depot/props/barrel.ma", "maya", 4101, "env_amy")
@@ -148,5 +187,8 @@ ALL_SCENARIOS = [
     scenario_resolve_all_three_facets,
     invariant_rename_does_not_touch_source_or_runtime,
     invariant_single_latest_source_version,
+    scenario_find_similar_nudges_reuse,
+    scenario_backfill_worklist_lists_only_provisional,
+    scenario_floating_dependencies_flags_footguns,
     spine_records_declares_and_writes,
 ]

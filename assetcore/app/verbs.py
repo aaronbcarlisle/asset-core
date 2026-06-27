@@ -167,3 +167,42 @@ def used_by(repo: AssetRepo, asset_id: UUID) -> list[Relationship]:
 def lineage(repo: AssetRepo, asset_id: UUID) -> list[Relationship]:
     """What is this derived from / instancing? (where did this come from)"""
     return [e for e in repo.edges_from(asset_id) if e.rel_type in _LINEAGE_TYPES]
+
+
+# ---------------------------------------------------------------------------
+# FIND_SIMILAR — the reuse-over-rebuild nudge at declare time (advisory only).
+# ---------------------------------------------------------------------------
+def find_similar(repo: AssetRepo, name: str, asset_type: str | None = None,
+                 limit: int = 10) -> list[tuple]:
+    """Rank existing assets that look like `name` so a human can reuse, not rebuild.
+
+    Returns (asset, identity, score) descending by score. Never auto-merges or
+    infers identity — the artist still chooses to reuse (relate the existing UUID)
+    or declare new. Anti-pattern #5 stays respected.
+    """
+    scored = []
+    for asset in repo.list_assets(asset_type=asset_type):
+        identity = repo.get_identity(asset.id)
+        score = rules.similarity_score(name, asset, identity)
+        if score > 0:
+            scored.append((asset, identity, score))
+    scored.sort(key=lambda t: t[2], reverse=True)
+    return scored[:limit]
+
+
+# ---------------------------------------------------------------------------
+# BACKFILL_WORKLIST — the provisional queue Production grooms (oldest first).
+# ---------------------------------------------------------------------------
+def backfill_worklist(repo: AssetRepo) -> list[tuple]:
+    """Provisional assets awaiting a claim, with their birth context. (asset, identity)."""
+    provisional = repo.list_assets(lifecycle=Lifecycle.PROVISIONAL)
+    provisional.sort(key=lambda a: a.created_at)          # oldest first: groom the tail
+    return [(a, repo.get_identity(a.id)) for a in provisional]
+
+
+# ---------------------------------------------------------------------------
+# FLOATING_DEPENDENCIES — the float footgun guard before delivery.
+# ---------------------------------------------------------------------------
+def floating_dependencies(repo: AssetRepo, asset_id: UUID) -> list[Relationship]:
+    """The consumer's DEPENDS_ON edges still floating — pin these before ship."""
+    return rules.floating_dependencies(repo.edges_from(asset_id, RelType.DEPENDS_ON))

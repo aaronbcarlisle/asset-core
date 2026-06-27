@@ -58,6 +58,14 @@ class DCCAdapter(ABC):
                                 self.current_revision(doc), artist)
         return asset_id
 
+    def suggest_existing(self, asset_type: str, name: str) -> list[dict]:
+        """Declare-time dedupe nudge: existing assets like `name` to reuse first.
+
+        Advisory — the artist still decides to reuse (reference the returned id) or
+        publish a new identity. The SDK never auto-merges on a name match.
+        """
+        return self.client.find_similar(name, asset_type)
+
     def reference(self, doc, dependency_id: str, mode: str = "float") -> dict | None:
         """Relate this doc's asset as DEPENDS_ON `dependency_id`, return what to load."""
         consumer_id = self.read_stamp(doc)

@@ -8,7 +8,9 @@ microseconds, and what tool churn can never reach.
 If you are tempted to pass a repo into one of these, the logic belongs in
 app/verbs.py instead — that is the boundary this module defends.
 """
-from .entities import Relationship, SourceVersion
+import re
+
+from .entities import Asset, IdentityFacet, Relationship, SourceVersion
 from .types import BindingMode, RelType
 
 
@@ -61,3 +63,33 @@ def can_overwrite_stamp(existing: str | None, incoming: str) -> bool:
     True when there is no existing stamp, or it already matches the incoming one.
     """
     return existing is None or existing == incoming
+
+
+def floating_dependencies(edges: list[Relationship]) -> list[Relationship]:
+    """The float footgun guard: which DEPENDS_ON edges are still floating.
+
+    A delivery step can require these be pinned before ship — pure function of the
+    consumer's outgoing edges (ARCHITECTURE Part 7 risk #3).
+    """
+    return [
+        e for e in edges
+        if e.rel_type == RelType.DEPENDS_ON and e.binding_mode == BindingMode.FLOAT
+    ]
+
+
+def _tokens(text: str | None) -> set[str]:
+    return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
+
+
+def similarity_score(query: str, asset: Asset, identity: IdentityFacet) -> int:
+    """How many query tokens an existing asset shares — the dedupe NUDGE.
+
+    Advisory only: this ranks candidates for a human to consider, it NEVER infers
+    identity from a name (that would be anti-pattern #5). Score is token overlap
+    across the human-facing identity fields + asset_type + origin context.
+    """
+    haystack = " ".join(filter(None, [
+        identity.display_name, identity.taxonomy, " ".join(identity.tags),
+        asset.asset_type, " ".join(str(v) for v in asset.origin.values()),
+    ]))
+    return len(_tokens(query) & _tokens(haystack))

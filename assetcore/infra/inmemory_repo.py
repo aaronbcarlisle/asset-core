@@ -41,6 +41,14 @@ class InMemoryRepo:
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
         return self.identities.get(asset_id)
 
+    def list_assets(self, asset_type: str | None = None,
+                    lifecycle: Lifecycle | None = None) -> list[Asset]:
+        return [
+            a for a in self.assets.values()
+            if (asset_type is None or a.asset_type == asset_type)
+            and (lifecycle is None or a.lifecycle == lifecycle)
+        ]
+
     def save_identity(self, identity: IdentityFacet) -> None:
         self.identities[identity.asset_id] = identity
 

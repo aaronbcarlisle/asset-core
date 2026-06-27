@@ -117,3 +117,21 @@ class RelationshipOut(BaseModel):
     rel_type: RelType
     binding_mode: BindingMode | None
     pinned_version: int | None
+
+
+class SimilarCandidate(BaseModel):
+    id: UUID
+    asset_type: str
+    lifecycle: Lifecycle
+    display_name: str | None
+    taxonomy: str | None
+    score: int
+
+
+class WorklistItem(BaseModel):
+    id: UUID
+    asset_type: str
+    created_by: str
+    created_at: str
+    origin: dict
+    display_name: str | None

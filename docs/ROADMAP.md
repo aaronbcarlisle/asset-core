@@ -99,11 +99,20 @@ state — never build for weeks without something to smoke-test.
 - **Done when:** it's easy. ✅ Four methods + one parametrize line per tool; the
   thesis executed.
 
-## Phase 7 — Tracker + human surfaces
-- [ ] `integrations/shotgrid.py` (TrackerAdapter) as a VIEW (never path-driving)
-- [ ] Provisional-backfill worklist UI
-- [ ] `find_similar` dedupe nudge at declare time
-- [ ] Publish-time validation gates (the float-reference footgun guard)
+## Phase 7 — Tracker + human surfaces  ✅
+- [x] `integrations/shotgrid.py` (ShotGridAdapter / TrackerAdapter) as a VIEW —
+      proven by a contract test that it touches ONLY resolve/rename, never
+      bind_*/relate (a recording client enforces "never path-driving").
+- [x] Provisional-backfill worklist: `GET /worklist/provisional` (oldest-first,
+      with origin context). The data surface a grooming UI consumes — no GUI built
+      (this is the backend project).
+- [x] `find_similar` dedupe nudge: new verb + `GET /similar` + `DCCAdapter.
+      suggest_existing`. **Advisory only** (pure token-overlap rule; never infers
+      identity from a name — anti-pattern #5 respected).
+- [x] Float-footgun validation gate: `rules.floating_dependencies` + verb +
+      `GET /assets/{id}/floating-dependencies`.
+- New port method `list_assets(asset_type?, lifecycle?)` across all three repos;
+      new behaviors covered on in-memory + sqlite via the shared scenario suite.
 
 ## Phase 8 — Hardening to finished product
 - [ ] Stamp-coverage CI gate (build fails on any unstamped shipped asset)

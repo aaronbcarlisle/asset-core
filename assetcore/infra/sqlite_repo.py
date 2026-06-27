@@ -96,6 +96,27 @@ class SqliteRepo:
             created_at=_parse_dt(row["created_at"]),
         )
 
+    def list_assets(self, asset_type: str | None = None,
+                    lifecycle: Lifecycle | None = None) -> list[Asset]:
+        sql, params = "SELECT * FROM asset", []
+        clauses = []
+        if asset_type is not None:
+            clauses.append("asset_type = ?")
+            params.append(asset_type)
+        if lifecycle is not None:
+            clauses.append("lifecycle = ?")
+            params.append(Lifecycle(lifecycle).value)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        return [
+            Asset(
+                asset_type=r["asset_type"], created_by=r["created_by"], id=UUID(r["id"]),
+                lifecycle=Lifecycle(r["lifecycle"]), origin=json.loads(r["origin"]),
+                created_at=_parse_dt(r["created_at"]),
+            )
+            for r in self.conn.execute(sql, params).fetchall()
+        ]
+
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
         row = self.conn.execute(
             "SELECT * FROM facet_identity WHERE asset_id = ?", (str(asset_id),)).fetchone()

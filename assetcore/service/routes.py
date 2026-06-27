@@ -26,8 +26,10 @@ from assetcore.service.schemas import (
     ResolveResponse,
     RuntimeOut,
     SetBindingRequest,
+    SimilarCandidate,
     SourceOut,
     VersionResponse,
+    WorklistItem,
 )
 
 router = APIRouter()
@@ -142,6 +144,41 @@ def used_by(asset_id: UUID, service: AssetcoreService = Depends(get_service)) ->
 @router.get("/assets/{asset_id}/lineage", response_model=list[RelationshipOut])
 def lineage(asset_id: UUID, service: AssetcoreService = Depends(get_service)) -> list[RelationshipOut]:
     return [RelationshipOut.model_validate(r) for r in service.lineage(asset_id)]
+
+
+# --- human surfaces (Phase 7) ----------------------------------------------
+@router.get("/similar", response_model=list[SimilarCandidate])
+def find_similar(name: str, asset_type: str | None = None,
+                 service: AssetcoreService = Depends(get_service)) -> list[SimilarCandidate]:
+    """Reuse-over-rebuild nudge: existing assets like `name` (advisory only)."""
+    return [
+        SimilarCandidate(
+            id=asset.id, asset_type=asset.asset_type, lifecycle=asset.lifecycle,
+            display_name=identity.display_name if identity else None,
+            taxonomy=identity.taxonomy if identity else None, score=score,
+        )
+        for asset, identity, score in service.find_similar(name, asset_type)
+    ]
+
+
+@router.get("/worklist/provisional", response_model=list[WorklistItem])
+def backfill_worklist(service: AssetcoreService = Depends(get_service)) -> list[WorklistItem]:
+    """The provisional backfill queue Production grooms (oldest first)."""
+    return [
+        WorklistItem(
+            id=asset.id, asset_type=asset.asset_type, created_by=asset.created_by,
+            created_at=asset.created_at.isoformat(), origin=asset.origin,
+            display_name=identity.display_name if identity else None,
+        )
+        for asset, identity in service.backfill_worklist()
+    ]
+
+
+@router.get("/assets/{asset_id}/floating-dependencies", response_model=list[RelationshipOut])
+def floating_dependencies(asset_id: UUID,
+                          service: AssetcoreService = Depends(get_service)) -> list[RelationshipOut]:
+    """The float-footgun guard: DEPENDS_ON edges still floating before delivery."""
+    return [RelationshipOut.model_validate(r) for r in service.floating_dependencies(asset_id)]
 
 
 # --- the event spine --------------------------------------------------------

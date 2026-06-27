@@ -60,3 +60,12 @@ class AssetcoreService:
 
     def lineage(self, asset_id: UUID) -> list[Relationship]:
         return verbs.lineage(self.repo, asset_id)
+
+    def find_similar(self, name: str, asset_type: str | None = None, limit: int = 10) -> list[tuple]:
+        return verbs.find_similar(self.repo, name, asset_type, limit)
+
+    def backfill_worklist(self) -> list[tuple]:
+        return verbs.backfill_worklist(self.repo)
+
+    def floating_dependencies(self, asset_id: UUID) -> list[Relationship]:
+        return verbs.floating_dependencies(self.repo, asset_id)

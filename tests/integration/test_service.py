@@ -141,6 +141,41 @@ def test_duplicate_edge_is_400(client):
     assert client.post("/relate", json=body, headers=ARTIST).status_code == 400
 
 
+# --- human surfaces (Phase 7) ----------------------------------------------
+def test_find_similar_endpoint(client):
+    a = _declare(client)
+    client.post(f"/assets/{a}/claim", json={"display_name": "Weathered Barrel",
+                "taxonomy": "props/containers/barrel", "actor": "pat"}, headers=PROD)
+    b = _declare(client)
+    client.post(f"/assets/{b}/claim", json={"display_name": "Wooden Crate",
+                "taxonomy": "props/containers/crate", "actor": "pat"}, headers=PROD)
+
+    hits = client.get("/similar", params={"name": "barrel", "asset_type": "prop"}).json()
+    ids = [h["id"] for h in hits]
+    assert a in ids and b not in ids
+    assert hits[0]["score"] >= 1
+
+
+def test_provisional_worklist_endpoint(client):
+    pending = _declare(client)
+    claimed = _declare(client)
+    client.post(f"/assets/{claimed}/claim", json={"display_name": "N", "taxonomy": "t",
+                "actor": "pat"}, headers=PROD)
+
+    work = client.get("/worklist/provisional").json()
+    ids = [w["id"] for w in work]
+    assert pending in ids and claimed not in ids
+
+
+def test_floating_dependencies_endpoint(client):
+    anim = _declare(client, asset_type="anim")
+    mat = _declare(client, asset_type="material")
+    client.post("/relate", json={"from_asset": anim, "to_asset": mat, "rel_type": "DEPENDS_ON",
+                "binding_mode": "float"}, headers=ARTIST)
+    floating = client.get(f"/assets/{anim}/floating-dependencies").json()
+    assert [e["to_asset"] for e in floating] == [mat]
+
+
 # --- the event spine --------------------------------------------------------
 def _types(frames: list[str]) -> list[str]:
     # each SSE frame is "id: N\nevent: <type>\ndata: {...}\n\n"

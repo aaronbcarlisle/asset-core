@@ -92,3 +92,15 @@ class AssetcoreClient:
 
     def lineage(self, asset_id: str) -> list[dict]:
         return self._get(f"/assets/{asset_id}/lineage").json()
+
+    def find_similar(self, name: str, asset_type: str | None = None) -> list[dict]:
+        params: dict[str, Any] = {"name": name}
+        if asset_type is not None:
+            params["asset_type"] = asset_type
+        return self._get("/similar", params).json()
+
+    def backfill_worklist(self) -> list[dict]:
+        return self._get("/worklist/provisional").json()
+
+    def floating_dependencies(self, asset_id: str) -> list[dict]:
+        return self._get(f"/assets/{asset_id}/floating-dependencies").json()

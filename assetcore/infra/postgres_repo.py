@@ -82,6 +82,26 @@ class PostgresRepo:
             lifecycle=Lifecycle(row["lifecycle"]), origin=row["origin"], created_at=row["created_at"],
         )
 
+    def list_assets(self, asset_type: str | None = None,
+                    lifecycle: Lifecycle | None = None) -> list[Asset]:
+        sql, params = "SELECT * FROM asset", []
+        clauses = []
+        if asset_type is not None:
+            clauses.append("asset_type = %s")
+            params.append(asset_type)
+        if lifecycle is not None:
+            clauses.append("lifecycle = %s")
+            params.append(Lifecycle(lifecycle).value)
+        if clauses:
+            sql += " WHERE " + " AND ".join(clauses)
+        return [
+            Asset(
+                asset_type=r["asset_type"], created_by=r["created_by"], id=r["id"],
+                lifecycle=Lifecycle(r["lifecycle"]), origin=r["origin"], created_at=r["created_at"],
+            )
+            for r in self._all(sql, tuple(params))
+        ]
+
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
         row = self._one("SELECT * FROM facet_identity WHERE asset_id = %s", (asset_id,))
         if row is None:
