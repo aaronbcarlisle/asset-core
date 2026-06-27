@@ -64,8 +64,12 @@ class _RealMayaScene:
 class _RealMayaVcs:
     """Depot path + revision via the `p4` CLI (needs a configured workspace)."""
 
+    # NOTE: the global `-F "%field%"` formatter is unreliable on a real server
+    # (verified P4D 2025.1): `-F "%path%"` yields nothing, `-F "%change%"` yields
+    # "Change 1" not "1". Prefixing `-ztag` makes field substitution correct, so
+    # every p4 read here uses `-ztag -F`.
     def depot_path(self, local_path: str) -> str:
-        out = subprocess.run(["p4", "-F", "%depotFile%", "where", local_path],
+        out = subprocess.run(["p4", "-ztag", "-F", "%depotFile%", "where", local_path],
                              capture_output=True, text=True, check=True).stdout.strip()
         if not out:   # don't silently fall back to a local path that routes to the wrong resolver
             raise RuntimeError(
@@ -73,7 +77,7 @@ class _RealMayaVcs:
         return out.splitlines()[0]
 
     def revision(self, local_path: str) -> str:
-        out = subprocess.run(["p4", "-F", "%change%", "changes", "-m1", local_path],
+        out = subprocess.run(["p4", "-ztag", "-F", "%change%", "changes", "-m1", local_path],
                              capture_output=True, text=True, check=True).stdout.strip()
         return out.splitlines()[0] if out else "0"
 

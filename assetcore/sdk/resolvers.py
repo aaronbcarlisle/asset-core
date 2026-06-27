@@ -71,10 +71,16 @@ class PerforceResolver:
     def fetch(self, location_uri: str) -> str:
         self._run(["p4", "sync", location_uri])              # pull the revision
         depot = location_uri.split("@", 1)[0]                # strip @CL for `where`
-        out = self._run(["p4", "-F", "%path%", "where", depot]).strip()
-        if not out:
-            raise FileNotFoundError(f"p4 where returned nothing for {depot!r}")
-        return out.splitlines()[0]
+        # `-F "%path%"` returns EMPTY against a real server (verified on P4D 2025.1)
+        # — the global formatter doesn't expose `where`'s local-path field. `-ztag`
+        # does, reliably, so parse its `... path <local>` line(s). When a file matches
+        # several view lines the LAST mapping wins, so take the last path.
+        out = self._run(["p4", "-ztag", "where", depot])
+        paths = [line[len("... path "):].strip()
+                 for line in out.splitlines() if line.startswith("... path ")]
+        if not paths:
+            raise FileNotFoundError(f"p4 where returned no local path for {depot!r}")
+        return paths[-1]
 
 
 def default_registry() -> ResolverRegistry:
