@@ -70,9 +70,9 @@ def rename(repo: AssetRepo, sink: EventSink, asset_id: UUID, new_name: str,
 # ---------------------------------------------------------------------------
 def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: str,
                 tool: str, revision: str, published_by: str) -> int:
-    existing = repo.source_versions(asset_id)
-    v = rules.next_version_num(existing)
-    rules.demote_latest(existing)            # mutates prior latest; repo holds live refs
+    v = rules.next_version_num(repo.source_versions(asset_id))
+    # The repo demotes the prior latest as part of the write (the schema's
+    # one_latest_source unique index forces demote-then-insert atomically).
     repo.add_source_version(SourceVersion(
         asset_id=asset_id, location_uri=location_uri, tool=tool,
         revision=str(revision), version_num=v, is_latest=True, published_by=published_by,
@@ -87,9 +87,8 @@ def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: 
 # ---------------------------------------------------------------------------
 def bind_runtime(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: str,
                  build_id: str) -> int:
-    existing = repo.runtime_versions(asset_id)
-    v = rules.next_version_num(existing)
-    rules.demote_latest(existing)
+    v = rules.next_version_num(repo.runtime_versions(asset_id))
+    # one_latest_runtime invariant is enforced at write time by the repo.
     repo.add_runtime_version(RuntimeVersion(
         asset_id=asset_id, location_uri=location_uri, build_id=build_id,
         version_num=v, is_latest=True,
@@ -176,3 +175,47 @@ def used_by(repo: AssetRepo, asset_id: UUID) -> list[Relationship]:
 def lineage(repo: AssetRepo, asset_id: UUID) -> list[Relationship]:
     """What is this derived from / instancing? (where did this come from)"""
     return [e for e in repo.edges_from(asset_id) if e.rel_type in _LINEAGE_TYPES]
+
+
+# ---------------------------------------------------------------------------
+# FIND_SIMILAR — the reuse-over-rebuild nudge at declare time (advisory only).
+# ---------------------------------------------------------------------------
+def find_similar(repo: AssetRepo, name: str, asset_type: str | None = None,
+                 limit: int = 10) -> list[tuple]:
+    """Rank existing assets that look like `name` so a human can reuse, not rebuild.
+
+    Returns (asset, identity, score) descending by score. Never auto-merges or
+    infers identity — the artist still chooses to reuse (relate the existing UUID)
+    or declare new. Anti-pattern #5 stays respected.
+
+    Note: this does one get_identity per candidate (an N+1 on SQL backends). It is
+    an interactive, type-scoped, advisory nudge over a single asset_type, so the
+    candidate set is small; a batched list-with-identity port method is a future
+    optimization, not a correctness issue (see PR #7 review thread).
+    """
+    scored = []
+    for asset in repo.list_assets(asset_type=asset_type):
+        identity = repo.get_identity(asset.id)
+        score = rules.similarity_score(name, asset, identity)
+        if score > 0:
+            scored.append((asset, identity, score))
+    scored.sort(key=lambda t: t[2], reverse=True)
+    return scored[:limit]
+
+
+# ---------------------------------------------------------------------------
+# BACKFILL_WORKLIST — the provisional queue Production grooms (oldest first).
+# ---------------------------------------------------------------------------
+def backfill_worklist(repo: AssetRepo) -> list[tuple]:
+    """Provisional assets awaiting a claim, with their birth context. (asset, identity)."""
+    provisional = repo.list_assets(lifecycle=Lifecycle.PROVISIONAL)
+    provisional.sort(key=lambda a: a.created_at)          # oldest first: groom the tail
+    return [(a, repo.get_identity(a.id)) for a in provisional]
+
+
+# ---------------------------------------------------------------------------
+# FLOATING_DEPENDENCIES — the float footgun guard before delivery.
+# ---------------------------------------------------------------------------
+def floating_dependencies(repo: AssetRepo, asset_id: UUID) -> list[Relationship]:
+    """The consumer's DEPENDS_ON edges still floating — pin these before ship."""
+    return rules.floating_dependencies(repo.edges_from(asset_id, RelType.DEPENDS_ON))

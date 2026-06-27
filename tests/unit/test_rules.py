@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 
 from assetcore.core import rules
-from assetcore.core.entities import Relationship, SourceVersion
+from assetcore.core.entities import Asset, IdentityFacet, Relationship, SourceVersion
 from assetcore.core.types import BindingMode, RelType
 
 
@@ -113,3 +113,38 @@ def test_overwrite_when_same_stamp():
 
 def test_no_overwrite_when_different_stamp():
     assert rules.can_overwrite_stamp("x", "y") is False
+
+
+# --- floating_dependencies (the footgun guard) ------------------------------
+def test_floating_dependencies_flags_float_and_unset_not_pin():
+    a, m, u, t, p = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
+    edges = [
+        Relationship(a, m, RelType.DEPENDS_ON, binding_mode=BindingMode.FLOAT),
+        Relationship(a, u, RelType.DEPENDS_ON),                          # unset == floating
+        Relationship(a, t, RelType.DEPENDS_ON, binding_mode=BindingMode.PIN, pinned_version=1),
+        Relationship(a, p, RelType.COMPOSED_OF),
+    ]
+    floating = {e.to_asset for e in rules.floating_dependencies(edges)}
+    assert floating == {m, u}      # float + unset flagged; pin + non-DEPENDS_ON not
+
+
+# --- similarity_score (the dedupe nudge) ------------------------------------
+def _asset_with(name, taxonomy="", asset_type="prop", tags=None, origin=None):
+    a = Asset(asset_type=asset_type, created_by="amy", origin=origin or {})
+    ident = IdentityFacet(asset_id=a.id, display_name=name, taxonomy=taxonomy, tags=tags or [])
+    return a, ident
+
+
+def test_similarity_scores_name_token_overlap():
+    a, ident = _asset_with("Weathered Barrel", "props/containers/barrel")
+    assert rules.similarity_score("barrel", a, ident) >= 1
+
+
+def test_similarity_zero_for_unrelated():
+    a, ident = _asset_with("Wooden Crate", "props/containers/crate")
+    assert rules.similarity_score("barrel", a, ident) == 0
+
+
+def test_similarity_matches_origin_context():
+    a, ident = _asset_with(None, origin={"declared_while_on": "pirate_barrel_ship"})
+    assert rules.similarity_score("barrel", a, ident) >= 1
