@@ -56,20 +56,12 @@ def test_perforce_resolver_builds_sync_then_where():
     """The p4 command construction is verified via an injected runner (no server)."""
     calls = []
 
-    def fake_runner(args):
-        calls.append(args)
-        if args[:2] == ["p4", "sync"]:
-            return ""
-        if "where" in args:
-            return "//depot/art/barrel.ma /ws/art/barrel.ma /local/art/barrel.ma\n"
-        return ""
-
     # the default %path% format makes `where` return just the local path:
-    def fake_runner_pathonly(args):
+    def fake_runner(args):
         calls.append(args)
         return "" if args[:2] == ["p4", "sync"] else "/local/art/barrel.ma\n"
 
-    resolver = PerforceResolver(runner=fake_runner_pathonly)
+    resolver = PerforceResolver(runner=fake_runner)
     local = resolver.fetch("//depot/art/barrel.ma@4101")
 
     assert local == "/local/art/barrel.ma"
