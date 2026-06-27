@@ -161,6 +161,20 @@ class SqliteRepo:
                  1 if v.is_latest else 0, _dt(v.published_at), v.published_by),
             )
 
+    def update_source_location(self, asset_id: UUID, new_location_uri: str,
+                               new_revision: str | None = None) -> bool:
+        with self.conn:   # in-place location update of the latest version (a move, not a version)
+            if new_revision is None:
+                cur = self.conn.execute(
+                    "UPDATE facet_source_version SET location_uri=?"
+                    " WHERE asset_id=? AND is_latest=1", (new_location_uri, str(asset_id)))
+            else:
+                cur = self.conn.execute(
+                    "UPDATE facet_source_version SET location_uri=?, revision=?"
+                    " WHERE asset_id=? AND is_latest=1",
+                    (new_location_uri, str(new_revision), str(asset_id)))
+            return cur.rowcount > 0
+
     def source_versions(self, asset_id: UUID) -> list[SourceVersion]:
         rows = self.conn.execute(
             "SELECT * FROM facet_source_version WHERE asset_id=? ORDER BY version_num",
@@ -187,6 +201,13 @@ class SqliteRepo:
                 (str(v.asset_id), v.location_uri, v.build_id, v.version_num,
                  1 if v.is_latest else 0, _dt(v.cooked_at)),
             )
+
+    def update_runtime_location(self, asset_id: UUID, new_location_uri: str) -> bool:
+        with self.conn:
+            cur = self.conn.execute(
+                "UPDATE facet_runtime_version SET location_uri=?"
+                " WHERE asset_id=? AND is_latest=1", (new_location_uri, str(asset_id)))
+            return cur.rowcount > 0
 
     def runtime_versions(self, asset_id: UUID) -> list[RuntimeVersion]:
         rows = self.conn.execute(

@@ -107,8 +107,16 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
     rel_type = RelType(rel_type)
     if binding_mode is not None:
         binding_mode = BindingMode(binding_mode)
+    attributes: dict = {}
+    if rel_type == RelType.DERIVED_FROM:
+        # anchor staleness: record the source version this child was derived at, so
+        # stale_derivations can flag it once the parent's source advances past it.
+        parent_latest = next((v for v in repo.source_versions(to) if v.is_latest), None)
+        if parent_latest is not None:
+            attributes["derived_at_version"] = parent_latest.version_num
     r = Relationship(from_asset=frm, to_asset=to, rel_type=rel_type,
-                     binding_mode=binding_mode, pinned_version=pinned_version)
+                     binding_mode=binding_mode, pinned_version=pinned_version,
+                     attributes=attributes)
     rules.validate_relationship(r)
     repo.add_relationship(r)
     sink.emit(Event(frm, "relationship.added",
@@ -219,3 +227,122 @@ def backfill_worklist(repo: AssetRepo) -> list[tuple]:
 def floating_dependencies(repo: AssetRepo, asset_id: UUID) -> list[Relationship]:
     """The consumer's DEPENDS_ON edges still floating — pin these before ship."""
     return rules.floating_dependencies(repo.edges_from(asset_id, RelType.DEPENDS_ON))
+
+
+# ---------------------------------------------------------------------------
+# DEPENDENTS / DEPENDENCIES — transitive graph closures (the impact brain).
+# ---------------------------------------------------------------------------
+def _as_reltypes(rel_types) -> set[RelType] | None:
+    return {RelType(rt) for rt in rel_types} if rel_types else None
+
+
+def dependents(repo: AssetRepo, asset_id: UUID, rel_types=None,
+               max_depth: int | None = None) -> list[tuple[UUID, int, RelType]]:
+    """Everything that (transitively) depends on this asset — "what breaks if I
+    change/rename/retire it". Walks edges UP (edges_to). Returns (asset_id, depth,
+    rel_type) in BFS order. `rel_types` filters which edge kinds to traverse.
+    """
+    want = _as_reltypes(rel_types)
+
+    def neighbors(node):
+        return [(e.from_asset, e.rel_type) for e in repo.edges_to(node)
+                if want is None or e.rel_type in want]
+
+    return rules.walk_closure(asset_id, neighbors, max_depth)
+
+
+def dependencies(repo: AssetRepo, asset_id: UUID, rel_types=None,
+                 max_depth: int | None = None) -> list[tuple[UUID, int, RelType]]:
+    """Everything this asset (transitively) depends on / is built from. Walks edges
+    DOWN (edges_from). Returns (asset_id, depth, rel_type) in BFS order.
+    """
+    want = _as_reltypes(rel_types)
+
+    def neighbors(node):
+        return [(e.to_asset, e.rel_type) for e in repo.edges_from(node)
+                if want is None or e.rel_type in want]
+
+    return rules.walk_closure(asset_id, neighbors, max_depth)
+
+
+# ---------------------------------------------------------------------------
+# RELOCATE — move/rename the BYTES (location), not the identity or the content.
+# ---------------------------------------------------------------------------
+def relocate(repo: AssetRepo, sink: EventSink, asset_id: UUID, new_location_uri: str,
+             actor: str, facet: str = "source", new_revision: str | None = None) -> None:
+    """Update a facet's location in place — a `p4 move` / directory reorg, not a
+    new authored version. Identity and every relationship are untouched (the whole
+    point of UUID-not-path). `facet` is 'source' or 'runtime'.
+    """
+    if facet == "source":
+        ok = repo.update_source_location(asset_id, new_location_uri, new_revision)
+        event = "source.relocated"
+    elif facet == "runtime":
+        ok = repo.update_runtime_location(asset_id, new_location_uri)
+        event = "runtime.relocated"
+    else:
+        raise ValueError(f"unknown facet {facet!r}; expected 'source' or 'runtime'")
+    if not ok:
+        raise ValueError(f"no {facet} facet to relocate for {asset_id}")
+    sink.emit(Event(asset_id, event, {"location_uri": new_location_uri, "facet": facet}, actor))
+
+
+# ---------------------------------------------------------------------------
+# DEPRECATE — retire an identity (lifecycle only). Check dependents first.
+# ---------------------------------------------------------------------------
+def deprecate(repo: AssetRepo, sink: EventSink, asset_id: UUID, actor: str) -> None:
+    """Mark an identity DEPRECATED. Reversible (it's a lifecycle flag, not a delete)
+    and never strips facets or edges — `dependents` still finds who's on it, so a
+    retire is safe and auditable.
+    """
+    if repo.get_asset(asset_id) is None:
+        raise ValueError(f"cannot deprecate unknown asset {asset_id}")
+    repo.set_lifecycle(asset_id, Lifecycle.DEPRECATED)
+    sink.emit(Event(asset_id, "identity.deprecated", {}, actor))
+
+
+# ---------------------------------------------------------------------------
+# STALE_DERIVATIONS — DERIVED_FROM children whose source advanced (re-bake needed).
+# ---------------------------------------------------------------------------
+def stale_derivations(repo: AssetRepo, asset_id: UUID) -> list[Relationship]:
+    """This asset's outgoing DERIVED_FROM edges whose parent source has advanced
+    past the version it was derived at — e.g. a bake whose high-poly was re-sculpted.
+    Advisory: it flags what to re-derive, it never auto-rebuilds.
+    """
+    stale = []
+    for e in repo.edges_from(asset_id, RelType.DERIVED_FROM):
+        parent_latest = next((v for v in repo.source_versions(e.to_asset) if v.is_latest), None)
+        current = parent_latest.version_num if parent_latest is not None else None
+        if rules.derivation_is_stale(e.attributes.get("derived_at_version"), current):
+            stale.append(e)
+    return stale
+
+
+# ---------------------------------------------------------------------------
+# BULK — the 100s-of-assets reality. Best-effort loops over the verbs (not one
+# transaction): each item is independent, and partial progress is recoverable
+# (re-running is idempotent for declare-by-spec callers that track returned ids).
+# ---------------------------------------------------------------------------
+def bulk_declare(repo: AssetRepo, sink: EventSink, specs: list[dict]) -> list[UUID]:
+    """specs: [{asset_type, created_by, origin?}, ...] -> the minted ids, in order."""
+    return [declare(repo, sink, s["asset_type"], s["created_by"], s.get("origin"))
+            for s in specs]
+
+
+def bulk_relate(repo: AssetRepo, sink: EventSink, edges: list[dict]) -> int:
+    """edges: [{frm, to, rel_type, actor, binding_mode?, pinned_version?}, ...]."""
+    for e in edges:
+        relate(repo, sink, e["frm"], e["to"], e["rel_type"], e["actor"],
+               binding_mode=e.get("binding_mode"), pinned_version=e.get("pinned_version"))
+    return len(edges)
+
+
+def bulk_relocate(repo: AssetRepo, sink: EventSink, moves: list[dict]) -> int:
+    """moves: [{asset_id, new_location_uri, actor, facet?, new_revision?}, ...].
+
+    The directory-move / reorg primitive: relocate many assets in one call.
+    """
+    for m in moves:
+        relocate(repo, sink, m["asset_id"], m["new_location_uri"], m["actor"],
+                 facet=m.get("facet", "source"), new_revision=m.get("new_revision"))
+    return len(moves)
