@@ -397,6 +397,10 @@ How it's wired (`mkdocs.yml` at the repo root):
 Keep `mkdocs build --strict` green: it's the gate that catches a broken cross-link
 or a `:::` pointing at a renamed module. The generated `site/` is git-ignored.
 
-> **Publishing (optional, not yet wired):** `mkdocs gh-deploy` pushes `site/` to a
-> `gh-pages` branch for GitHub Pages; a CI job running `mkdocs build --strict` on PRs
-> (and `gh-deploy` on `main`) is the natural next step when you want it hosted.
+### Continuous build & publish
+
+`.github/workflows/docs.yml` runs `mkdocs build --strict` on **every PR and push**
+(the gate), and **deploys to GitHub Pages from `main`** via the Pages-artifact flow
+(no `gh-pages` branch to manage). One-time repo setup to turn on hosting: **Settings →
+Pages → Build and deployment → Source = "GitHub Actions"**. Until that's set, the
+build job still runs and gates PRs; only the deploy step is idle.
