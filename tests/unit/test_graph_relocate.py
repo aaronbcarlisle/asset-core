@@ -1,11 +1,10 @@
-"""Phase-16 core gaps: transitive graph queries, relocate, deprecate, staleness, bulk.
+"""Phase 11 core gaps: transitive graph queries, relocate, deprecate, staleness, bulk.
 
 Pure-rule tests + verb tests against InMemoryRepo (the heart of the new capability;
 the SQL backends run the same behaviour via the shared scenario suite).
 """
 from assetcore.app import verbs
 from assetcore.core import rules
-from assetcore.core.entities import Asset, IdentityFacet
 from assetcore.core.types import Lifecycle, RelType
 from assetcore.infra.inmemory_repo import InMemoryRepo, InMemorySink
 

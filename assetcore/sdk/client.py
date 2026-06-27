@@ -118,7 +118,7 @@ class AssetcoreClient:
     def floating_dependencies(self, asset_id: str) -> list[dict]:
         return self._get(f"/assets/{asset_id}/floating-dependencies").json()
 
-    # --- pipeline graph + lifecycle + bulk (Phase 16) ---
+    # --- pipeline graph + lifecycle + bulk (Phase 11) ---
     def dependents(self, asset_id: str, rel_types: list[str] | None = None,
                    depth: int | None = None) -> list[dict]:
         """Transitive impact: what (transitively) depends on this asset."""

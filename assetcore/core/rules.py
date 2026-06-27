@@ -9,6 +9,7 @@ If you are tempted to pass a repo into one of these, the logic belongs in
 app/verbs.py instead — that is the boundary this module defends.
 """
 import re
+from collections import deque
 
 from .entities import Asset, IdentityFacet, Relationship, SourceVersion
 from .types import BindingMode, RelType
@@ -89,10 +90,10 @@ def walk_closure(start, neighbors, max_depth=None):
     the algorithm itself stays repo-free and unit-testable.
     """
     seen = {start}
-    frontier = [(start, 0)]
+    frontier = deque([(start, 0)])   # true FIFO: O(1) dequeue (BFS stays O(V+E))
     reached = []
     while frontier:
-        node, depth = frontier.pop(0)
+        node, depth = frontier.popleft()
         if max_depth is not None and depth >= max_depth:
             continue
         for nxt, label in neighbors(node):

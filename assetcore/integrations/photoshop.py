@@ -64,7 +64,7 @@ _JSX_GET = """
   XMPMeta.registerNamespace(%(ns)s, "assetcore");
   var xmp = new XMPMeta(activeDocument.xmpMetadata.rawData);
   var p = xmp.getProperty(%(ns)s, key);
-  return p ? String(p) : "";
+  return (p && p.value) ? p.value : "";   // XMPProperty stores the text on .value
 })(%(key)s);
 """
 

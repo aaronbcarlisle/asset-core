@@ -212,16 +212,22 @@ async def dependents(asset_id: UUID, rel_types: str | None = None, depth: int | 
                      service: AssetcoreService = Depends(get_service)) -> list[GraphNodeOut]:
     """Transitive impact: everything that depends on this asset (what breaks if I
     change/rename/retire it). `rel_types` is comma-separated; `depth` bounds the walk."""
-    return [GraphNodeOut(asset_id=a, depth=d, rel_type=rt)
-            for a, d, rt in service.dependents(asset_id, _parse_rel_types(rel_types), depth)]
+    try:
+        reached = service.dependents(asset_id, _parse_rel_types(rel_types), depth)
+    except ValueError as exc:   # an invalid rel_types value -> 400, not 500
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [GraphNodeOut(asset_id=a, depth=d, rel_type=rt) for a, d, rt in reached]
 
 
 @router.get("/assets/{asset_id}/dependencies", response_model=list[GraphNodeOut])
 async def dependencies(asset_id: UUID, rel_types: str | None = None, depth: int | None = None,
                        service: AssetcoreService = Depends(get_service)) -> list[GraphNodeOut]:
     """Transitive: everything this asset is built from / depends on."""
-    return [GraphNodeOut(asset_id=a, depth=d, rel_type=rt)
-            for a, d, rt in service.dependencies(asset_id, _parse_rel_types(rel_types), depth)]
+    try:
+        reached = service.dependencies(asset_id, _parse_rel_types(rel_types), depth)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return [GraphNodeOut(asset_id=a, depth=d, rel_type=rt) for a, d, rt in reached]
 
 
 @router.get("/assets/{asset_id}/stale-derivations", response_model=list[RelationshipOut])

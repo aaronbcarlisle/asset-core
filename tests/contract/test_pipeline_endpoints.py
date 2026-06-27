@@ -1,6 +1,8 @@
-"""Phase-16 endpoints over the real HTTP stack (via the SDK client + TestClient):
+"""Phase 11 endpoints over the real HTTP stack (via the SDK client + TestClient):
 transitive dependents/dependencies, relocate, deprecate, stale-derivations, bulk.
 """
+import httpx
+import pytest
 
 
 def test_dependents_dependencies_over_http(make_client):
@@ -18,6 +20,14 @@ def test_dependents_dependencies_over_http(make_client):
     # rel_type filter + depth bound flow through the query params
     assert c.dependents(prop, rel_types=["DEPENDS_ON"]) == []
     assert {d["asset_id"] for d in c.dependents(prop, depth=1)} == {district}
+
+
+def test_dependents_bad_rel_type_is_400(make_client):
+    c = make_client("artist-token")
+    a = c.declare("prop", "amy")
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        c.dependents(a, rel_types=["BOGUS"])      # invalid enum -> 400, not 500
+    assert exc.value.response.status_code == 400
 
 
 def test_relocate_over_http(make_client):

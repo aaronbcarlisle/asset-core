@@ -71,7 +71,7 @@ class AssetcoreService:
     def floating_dependencies(self, asset_id: UUID) -> list[Relationship]:
         return verbs.floating_dependencies(self.repo, asset_id)
 
-    # --- pipeline graph + lifecycle + bulk (Phase 16) ---
+    # --- pipeline graph + lifecycle + bulk (Phase 11) ---
     def dependents(self, asset_id: UUID, rel_types=None, max_depth: int | None = None) -> list[tuple]:
         return verbs.dependents(self.repo, asset_id, rel_types, max_depth)
 
