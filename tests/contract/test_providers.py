@@ -129,6 +129,70 @@ def test_missing_instance_raises():
         _load(SG_TOML).tracker("staging")   # only "production" is defined
 
 
+# --- repo providers: empty path normalizes to :memory: (Bugbot, high) -------
+@pytest.mark.parametrize("config", [{}, {"path": ""}])
+def test_sqlite_empty_path_falls_back_to_memory(monkeypatch, config):
+    """An unset ${ASSETCORE_SQLITE_PATH} expands to "" (settings._expand) and
+    reaches the factory as a key-present empty string — it must become :memory:,
+    not an anonymous on-disk temp db. Factory gets the post-expansion config."""
+    import assetcore.infra._providers as infra_providers
+
+    captured = {}
+
+    class _RecordingSqliteRepo:
+        def __init__(self, path, check_same_thread=False):
+            captured["path"] = path
+
+    monkeypatch.setattr(infra_providers, "SqliteRepo", _RecordingSqliteRepo)
+    from assetcore.sdk import providers
+    providers.build("repo", "sqlite", config)
+    assert captured["path"] == ":memory:"
+
+
+def test_settings_expands_unset_sqlite_env_to_empty(monkeypatch):
+    """End-to-end: an unset env in the toml expands to "" at load, which the
+    factory then normalizes to :memory: (the two fixes compose)."""
+    monkeypatch.delenv("ASSETCORE_SQLITE_PATH", raising=False)
+    import assetcore.infra._providers  # noqa: F401 — register repo providers
+    cfg = __import__("tomllib").loads(
+        '[repos.main]\nprovider = "sqlite"\n[repos.main.config]\npath = "${ASSETCORE_SQLITE_PATH}"\n')
+    repo = Settings(cfg).repo("main")
+    assert repo.__class__.__name__ == "SqliteRepo"   # built cleanly, no crash on ""
+
+
+def test_sqlite_real_path_passes_through(monkeypatch):
+    import assetcore.infra._providers as infra_providers
+
+    captured = {}
+
+    class _RecordingSqliteRepo:
+        def __init__(self, path, check_same_thread=False):
+            captured["path"] = path
+
+    monkeypatch.setattr(infra_providers, "SqliteRepo", _RecordingSqliteRepo)
+    from assetcore.sdk import providers
+    providers.build("repo", "sqlite", {"path": "/data/assets.db"})
+    assert captured["path"] == "/data/assets.db"
+
+
+# --- jira field mapping: Jira-correct types (Bugbot, medium) -----------------
+def test_jira_taxonomy_maps_to_a_label_list():
+    from assetcore.integrations.jira import _RealJiraSite
+
+    data = _RealJiraSite._to_jira_fields(
+        {"display_name": "Barrel", "taxonomy": "props/containers/barrel", "status": "active"})
+    assert data["summary"] == "Barrel"
+    assert data["labels"] == ["props/containers/barrel"]   # a list, not a scalar
+    assert "status" not in data                            # status is a transition, not a field
+
+
+def test_jira_field_mapping_skips_none():
+    from assetcore.integrations.jira import _RealJiraSite
+
+    assert _RealJiraSite._to_jira_fields({"display_name": "Barrel"}) == {"summary": "Barrel"}
+    assert _RealJiraSite._to_jira_fields({}) == {}
+
+
 # --- the load-bearing invariant: a built tracker is a VIEW ------------------
 def test_tracker_stays_a_view():
     """A TrackerAdapter exposes only identity-facing calls — never path verbs."""

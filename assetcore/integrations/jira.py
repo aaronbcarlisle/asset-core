@@ -29,18 +29,27 @@ class _RealJiraSite:
 
     UUID_FIELD = "customfield_assetcore_uuid"   # a Jira custom field holding identity
 
-    # map identity fields -> Jira issue fields; only non-None ones are written, so a
-    # mirror never clears a field the core didn't set (mirrors shotgrid's restraint).
-    _FIELD_MAP = {"display_name": "summary", "taxonomy": "labels", "status": "status"}
-
     def __init__(self, base_url: str, email: str, api_token: str, project: str) -> None:
         from jira import JIRA  # noqa: PLC0415 — lazy; absent without the jira client
         self._jira = JIRA(server=base_url, basic_auth=(email, api_token))
         self._project = project
 
+    @staticmethod
+    def _to_jira_fields(fields: dict) -> dict:
+        """Map identity fields -> Jira issue fields with Jira-correct TYPES; only
+        non-None ones are written, so a mirror never clears a field the core didn't
+        set (mirrors shotgrid's restraint). `labels` is a list of strings, not a
+        scalar. `status` is intentionally NOT mapped: in Jira a status is a workflow
+        transition, not a writable issue field — writing it would silently fail."""
+        data: dict = {}
+        if fields.get("display_name") is not None:
+            data["summary"] = fields["display_name"]
+        if fields.get("taxonomy") is not None:
+            data["labels"] = [fields["taxonomy"]]
+        return data
+
     def upsert(self, asset_id: str, fields: dict) -> None:
-        data = {col: fields[key] for key, col in self._FIELD_MAP.items()
-                if fields.get(key) is not None}
+        data = self._to_jira_fields(fields)
         found = self._jira.search_issues(
             f'project = {self._project} AND "{self.UUID_FIELD}" ~ "{asset_id}"', maxResults=1)
         if found:

@@ -21,7 +21,10 @@ from assetcore.sdk import providers
 
 @providers.register("repo", "sqlite")
 def _build_sqlite(config):
-    return SqliteRepo(config.get("path", ":memory:"), check_same_thread=False)
+    # `or` (not `.get` default): an unset ${ASSETCORE_SQLITE_PATH} expands to "",
+    # which is a key-present empty string — fall back to :memory: as documented,
+    # rather than letting sqlite open an unintended anonymous on-disk temp db.
+    return SqliteRepo(config.get("path") or ":memory:", check_same_thread=False)
 
 
 @providers.register("repo", "memory")
