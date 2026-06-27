@@ -63,6 +63,11 @@ def test_claim_rename_deprecate_need_production(make_client, capsys):
     assert code == 0
     assert json.loads(call(prod, "--json", "resolve", aid, capsys=capsys)[1])["meta"]["lifecycle"] == "active"
 
+    code, _ = call(prod, "rename", aid, "--name", "Barrel Renamed", "--actor", "pat", capsys=capsys)
+    assert code == 0
+    assert json.loads(call(prod, "--json", "resolve", aid,
+                           capsys=capsys)[1])["identity"]["display_name"] == "Barrel Renamed"
+
     call(prod, "deprecate", aid, "--actor", "pat", capsys=capsys)
     assert json.loads(call(prod, "--json", "resolve", aid, capsys=capsys)[1])["meta"]["lifecycle"] == "deprecated"
 

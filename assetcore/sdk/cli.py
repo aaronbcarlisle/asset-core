@@ -34,6 +34,11 @@ def _out(args, data, human: str) -> None:
     print(_json.dumps(data, indent=2, default=str) if getattr(args, "json", False) else human)
 
 
+def _csv(s):
+    """Parse a comma-separated flag, tolerant of spaces/empties: 'A, B,' -> ['A','B']."""
+    return [t.strip() for t in s.split(",") if t.strip()] if s else None
+
+
 def _node_line(n: dict) -> str:
     return f"  [{n['depth']}] {n['rel_type']:<12} {n['asset_id']}"
 
@@ -123,15 +128,15 @@ def run(args, client: AssetcoreClient) -> int:
     cmd = args.command
     if cmd == "resolve":
         r = client.resolve(args.asset_id)
-        ident, src, rt = r.get("identity") or {}, r.get("source") or {}, r.get("runtime") or {}
-        meta = r.get("meta") or {}
-        human = (f"{args.asset_id}\n"
-                 f"  identity : {ident.get('display_name')!r}  "
-                 f"({meta.get('lifecycle')}, {meta.get('asset_type')})\n"
-                 f"  source   : {src.get('tool')} {src.get('location_uri')} "
-                 f"(rev {src.get('revision')}, v{src.get('version_num')})\n"
-                 f"  runtime  : {rt.get('location_uri')} (build {rt.get('build_id')})")
-        _out(args, r, human)
+        ident, src, rt, meta = (r.get("identity") or {}, r.get("source") or {},
+                                r.get("runtime") or {}, r.get("meta") or {})
+        ident_line = (f"{ident.get('display_name')!r}  ({meta.get('lifecycle')}, "
+                      f"{meta.get('asset_type')})" if ident else "(none)")
+        src_line = (f"{src['tool']} {src['location_uri']} (rev {src['revision']}, "
+                    f"v{src['version_num']})" if src else "(none)")
+        rt_line = f"{rt['location_uri']} (build {rt['build_id']})" if rt else "(none)"
+        _out(args, r, f"{args.asset_id}\n  identity : {ident_line}\n"
+                      f"  source   : {src_line}\n  runtime  : {rt_line}")
     elif cmd == "declare":
         aid = client.declare(args.asset_type, args.created_by)
         _out(args, {"id": aid}, aid)
@@ -158,11 +163,11 @@ def run(args, client: AssetcoreClient) -> int:
         client.deprecate(args.asset_id, args.actor)
         _out(args, {"ok": True}, f"deprecated {args.asset_id}")
     elif cmd in ("dependents", "impact"):
-        rel = args.rel_types.split(",") if args.rel_types else None
+        rel = _csv(args.rel_types)
         nodes = client.dependents(args.asset_id, rel, args.depth)
         _out(args, nodes, f"{len(nodes)} dependents:\n" + "\n".join(_node_line(n) for n in nodes))
     elif cmd == "dependencies":
-        rel = args.rel_types.split(",") if args.rel_types else None
+        rel = _csv(args.rel_types)
         nodes = client.dependencies(args.asset_id, rel, args.depth)
         _out(args, nodes, f"{len(nodes)} dependencies:\n" + "\n".join(_node_line(n) for n in nodes))
     elif cmd == "used-by":
