@@ -106,6 +106,56 @@ class FakeMayaVcs:
         return "cl1"
 
 
+class _CurrentDocStore:
+    """A current-document model with per-document key/value storage (DCC scenes)."""
+
+    def __init__(self) -> None:
+        self._docs: dict[str, dict[str, str]] = {}
+        self._current: str | None = None
+
+    def open_or_new(self, path: str) -> None:
+        self._docs.setdefault(path, {})
+        self._current = path
+
+    def _get(self, key: str) -> str | None:
+        return self._docs[self._current].get(key)
+
+    def _set(self, key: str, value: str) -> None:
+        self._docs[self._current][key] = value
+
+
+class FakeBlenderScene(_CurrentDocStore):
+    def prop_get(self, key: str) -> str | None:
+        return self._get(key)
+
+    def prop_set(self, key: str, value: str) -> None:
+        self._set(key, value)
+
+
+class FakeBlenderVcs:
+    def location(self, local_path: str) -> str:
+        return f"git://repo@abc123{local_path}"
+
+    def revision(self, local_path: str) -> str:
+        return "abc123"
+
+
+class FakeSubstancePackage(_CurrentDocStore):
+    def metadata_get(self, key: str) -> str | None:
+        return self._get(key)
+
+    def metadata_set(self, key: str, value: str) -> None:
+        self._set(key, value)
+
+
+class FakeSubstanceVcs:
+    def location(self, local_path: str) -> str:
+        return f"//depot/mat{local_path}"
+
+    def revision(self, local_path: str) -> str:
+        return "cl9"
+
+
 class FakeUnrealEditor:
     """Models unreal.EditorAssetLibrary: metadata tags + an asset listing."""
 

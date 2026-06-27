@@ -87,12 +87,17 @@ state — never build for weeks without something to smoke-test.
   the real .ma. Adapter conformance proven here; the on-iron run is the remaining
   step, gated and ready.
 
-## Phase 6 — The swap test (proof of decoupling)
-- [ ] `integrations/blender.py`, `integrations/substance.py` — core untouched
-- [ ] Blender passes the identical contract suite
-- [ ] Cross-tool flow: Blender-authored asset, Maya animation, Substance material,
-      floating dependency — one unchanged core
-- **Done when:** it's easy. That ease IS the project's thesis, executed.
+## Phase 6 — The swap test (proof of decoupling)  ✅
+- [x] `integrations/blender.py`, `integrations/substance.py` — **core untouched**:
+      the only production code added was two L4 files (192 lines); `git diff` vs
+      Phase 5 shows ZERO changes under core/app/infra/service/sdk.
+- [x] Blender **and** Substance pass the identical DCC contract suite (now run
+      across 5 DCC adapters: dict, sidecar, maya, blender, substance).
+- [x] Cross-tool flow (tests/contract/test_swap_crosstool.py): a Blender barrel, a
+      Maya animation, a floating Substance material — one unchanged core; the
+      float dependency dissolves the bottleneck across tool boundaries.
+- **Done when:** it's easy. ✅ Four methods + one parametrize line per tool; the
+  thesis executed.
 
 ## Phase 7 — Tracker + human surfaces
 - [ ] `integrations/shotgrid.py` (TrackerAdapter) as a VIEW (never path-driving)

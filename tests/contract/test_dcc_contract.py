@@ -8,23 +8,34 @@ from uuid import uuid4
 
 import pytest
 
+from assetcore.integrations.blender import BlenderAdapter
 from assetcore.integrations.maya import MayaAdapter
+from assetcore.integrations.substance import SubstanceAdapter
 from assetcore.sdk.stamping import StampConflict
 from tests.contract.fakes import (
+    FakeBlenderScene,
+    FakeBlenderVcs,
     FakeDCCAdapter,
     FakeMayaVcs,
     FakeMayaScene,
     FakeSidecarDCCAdapter,
+    FakeSubstancePackage,
+    FakeSubstanceVcs,
 )
 
 # (id, builder(make_client, tmp_path) -> adapter). The artist authority owns source.
-# The REAL MayaAdapter runs the IDENTICAL suite via faithful fakes of maya.cmds +
-# the p4 workspace — the Part-5 thesis, exercised here without Maya installed.
+# Every REAL DCC adapter runs the IDENTICAL suite via faithful fakes of its tool
+# API. Maya/Blender/Substance are three different tools — same contract, no change
+# below L4. That sameness IS the thesis (Phase 6, the swap test).
 DCC_ADAPTERS = [
     pytest.param(lambda mk, tmp: FakeDCCAdapter(mk("artist-token")), id="dict-stamp"),
     pytest.param(lambda mk, tmp: FakeSidecarDCCAdapter(mk("artist-token"), tmp), id="sidecar-stamp"),
     pytest.param(lambda mk, tmp: MayaAdapter(mk("artist-token"), scene=FakeMayaScene(),
                                              vcs=FakeMayaVcs()), id="maya"),
+    pytest.param(lambda mk, tmp: BlenderAdapter(mk("artist-token"), scene=FakeBlenderScene(),
+                                                vcs=FakeBlenderVcs()), id="blender"),
+    pytest.param(lambda mk, tmp: SubstanceAdapter(mk("artist-token"), package=FakeSubstancePackage(),
+                                                  vcs=FakeSubstanceVcs()), id="substance"),
 ]
 
 
