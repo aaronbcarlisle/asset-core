@@ -176,7 +176,7 @@ python-api`'s version map can't resolve PS 2026), doing every op through
 DoJavaScript (XMP stamp into the `.psd`).
 
 ```bash
-python -m pip install --target ../ps-deps photoshop-python-api   # brings in comtypes
+python -m pip install --target ../ps-deps comtypes   # the only dep the adapter needs
 # with the service running, and Photoshop signed in to Adobe (COM can't launch a
 # half-authenticated app):
 python scripts/live_photoshop_publish.py

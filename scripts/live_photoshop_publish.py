@@ -14,7 +14,8 @@ Run (with the service up):
     python scripts/live_photoshop_publish.py
 
 Config via env (local defaults): ASSETCORE_URL, ASSETCORE_DEPS (<repo-parent>/
-ps-deps, where photoshop-python-api is installed), P4_BIN, P4_WS, P4PORT/P4USER/P4CLIENT.
+ps-deps, where comtypes is installed — the adapter drives the Photoshop COM ProgID
+directly), P4_BIN, P4_WS, P4PORT/P4USER/P4CLIENT.
 """
 import os
 import subprocess
@@ -78,6 +79,7 @@ def main() -> int:
         v2 = client.bind_source(aid, adapter.current_location(DOC), "photoshop",
                                 adapter.current_revision(DOC), "art_amy")
         step(f"re-published: source version {v2} now at real changelist {cl}")
+        assert adapter.current_revision(DOC) == cl, "revision seam disagrees with p4"
 
         print("\n[live-ps] PASS — real Photoshop -> P4 -> assetcore round-trip verified.")
         return 0
