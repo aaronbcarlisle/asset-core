@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 from assetcore.integrations.blender import BlenderAdapter
+from assetcore.integrations.max import MaxAdapter
 from assetcore.integrations.maya import MayaAdapter
 from assetcore.integrations.substance import SubstanceAdapter
 from assetcore.sdk.stamping import StampConflict
@@ -32,6 +33,10 @@ DCC_ADAPTERS = [
     pytest.param(lambda mk, tmp: FakeSidecarDCCAdapter(mk("artist-token"), tmp), id="sidecar-stamp"),
     pytest.param(lambda mk, tmp: MayaAdapter(mk("artist-token"), scene=FakeMayaScene(),
                                              vcs=FakeMayaVcs()), id="maya"),
+    # Max's seam shape is identical to Maya's, so it reuses the Maya fakes and passes
+    # the SAME contract unchanged — the weekend-adapter thesis, demonstrated.
+    pytest.param(lambda mk, tmp: MaxAdapter(mk("artist-token"), scene=FakeMayaScene(),
+                                            vcs=FakeMayaVcs()), id="max"),
     pytest.param(lambda mk, tmp: BlenderAdapter(mk("artist-token"), scene=FakeBlenderScene(),
                                                 vcs=FakeBlenderVcs()), id="blender"),
     pytest.param(lambda mk, tmp: SubstanceAdapter(mk("artist-token"), package=FakeSubstancePackage(),
