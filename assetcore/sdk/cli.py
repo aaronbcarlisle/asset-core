@@ -31,7 +31,7 @@ DEFAULT_TOKEN = os.environ.get("ASSETCORE_TOKEN", "artist-token")
 
 
 def _out(args, data, human: str) -> None:
-    print(_json.dumps(data, indent=2, default=str) if args.json else human)
+    print(_json.dumps(data, indent=2, default=str) if getattr(args, "json", False) else human)
 
 
 def _node_line(n: dict) -> str:
@@ -48,9 +48,12 @@ def build_parser() -> argparse.ArgumentParser:
     # global flags live on a shared parent applied to the root AND every subparser,
     # so `--url/--token/--json` work either before OR after the subcommand.
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--url", default=DEFAULT_URL, help="service base url")
-    common.add_argument("--token", default=DEFAULT_TOKEN, help="auth token (maps to an authority)")
-    common.add_argument("--json", action="store_true", help="print raw service JSON")
+    # default=SUPPRESS so a flag given before the subcommand isn't clobbered by the
+    # subparser's default (the argparse parents gotcha); effective values via getattr.
+    common.add_argument("--url", default=argparse.SUPPRESS, help="service base url")
+    common.add_argument("--token", default=argparse.SUPPRESS, help="auth token (maps to an authority)")
+    common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                        help="print raw service JSON")
 
     p = argparse.ArgumentParser(prog="assetcore", parents=[common],
                                 description="identity-first asset management")
@@ -189,8 +192,10 @@ def run(args, client: AssetcoreClient) -> int:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    url = getattr(args, "url", DEFAULT_URL)
+    token = getattr(args, "token", DEFAULT_TOKEN)
     try:
-        with AssetcoreClient(token=args.token, base_url=args.url) as client:
+        with AssetcoreClient(token=token, base_url=url) as client:
             return run(args, client)
     except Exception as exc:   # noqa: BLE001 — CLI maps any failure to a clean message + exit 1
         print(f"error: {exc}", file=sys.stderr)
