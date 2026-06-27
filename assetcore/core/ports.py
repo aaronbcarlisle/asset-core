@@ -1,0 +1,46 @@
+"""The ports — interfaces L0 defines and outer layers implement.
+
+`typing.Protocol` so implementations satisfy these structurally, without
+inheriting (InMemoryRepo, SqliteRepo, PostgresRepo all just match the shape).
+The core declares *what it needs*; it never learns *how* that need is met.
+"""
+from typing import Protocol
+from uuid import UUID
+
+from .entities import (
+    Asset,
+    Event,
+    IdentityFacet,
+    Relationship,
+    RuntimeVersion,
+    SourceVersion,
+)
+from .types import Lifecycle, RelType
+
+
+class AssetRepo(Protocol):
+    # --- identity ---
+    def create_asset(self, asset: Asset, identity: IdentityFacet) -> None: ...
+    def get_asset(self, asset_id: UUID) -> Asset | None: ...
+    def get_identity(self, asset_id: UUID) -> IdentityFacet | None: ...
+    def save_identity(self, identity: IdentityFacet) -> None: ...
+    def set_lifecycle(self, asset_id: UUID, lifecycle: Lifecycle) -> None: ...
+
+    # --- source facet (versioned) ---
+    def add_source_version(self, v: SourceVersion) -> None: ...
+    def source_versions(self, asset_id: UUID) -> list[SourceVersion]: ...
+
+    # --- runtime facet (versioned) ---
+    def add_runtime_version(self, v: RuntimeVersion) -> None: ...
+    def runtime_versions(self, asset_id: UUID) -> list[RuntimeVersion]: ...
+
+    # --- relationships (the graph) ---
+    def add_relationship(self, r: Relationship) -> None: ...
+    def upsert_relationship(self, r: Relationship) -> None: ...   # for set_binding
+    def edges_from(self, asset_id: UUID, rel_type: RelType | None = None) -> list[Relationship]: ...
+    def edges_to(self, asset_id: UUID, rel_type: RelType | None = None) -> list[Relationship]: ...
+    def get_edge(self, frm: UUID, to: UUID, rel_type: RelType) -> Relationship | None: ...
+
+
+class EventSink(Protocol):
+    def emit(self, event: Event) -> None: ...
