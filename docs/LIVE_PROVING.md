@@ -165,3 +165,24 @@ The orchestrator sequences the two headless tool processes and threads the minte
 id between them (Maya can't talk to Unreal; the *core* is the only shared spine).
 Per-tool deps are the Maya + Unreal sections above; config via `MAYAPY`, `UE_CMD`,
 `UE_PROJECT`, `MAYA_DEPS`, `UE_DEPS`.
+
+## Photoshop 2026 -> Perforce (Concept Art)
+
+Concept art is the front of the pipeline. The driver runs in a normal python (it
+has httpx); `comtypes` (for the Photoshop COM ProgID) is installed beside the repo
+in `ps-deps/` and added to `sys.path`. The real seam drives the generic
+`Photoshop.Application` COM ProgID via comtypes (version-agnostic — `photoshop-
+python-api`'s version map can't resolve PS 2026), doing every op through
+DoJavaScript (XMP stamp into the `.psd`).
+
+```bash
+python -m pip install --target ../ps-deps photoshop-python-api   # brings in comtypes
+# with the service running, and Photoshop signed in to Adobe (COM can't launch a
+# half-authenticated app):
+python scripts/live_photoshop_publish.py
+```
+
+`scripts/live_photoshop_publish.py` mints identity -> stamps the `.psd` XMP -> binds
+source to the live depot path -> verifies round-trip + resolve() -> `p4 submit` ->
+re-publishes to a real changelist. NOTE: this LAUNCHES the Photoshop app (COM
+automation is not headless). Look for `[live-ps] PASS`.
