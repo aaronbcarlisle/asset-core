@@ -40,10 +40,11 @@ def declare(repo: AssetRepo, sink: EventSink, asset_type: str, created_by: str,
 def claim(repo: AssetRepo, sink: EventSink, asset_id: UUID, display_name: str,
           taxonomy: str, actor: str, **attrs) -> None:
     identity = repo.get_identity(asset_id)
+    if identity is None:
+        raise ValueError(f"cannot claim unknown asset {asset_id}")
     identity.display_name = display_name
     identity.taxonomy = taxonomy
-    if attrs:
-        identity.attributes = dict(attrs)
+    identity.attributes = dict(attrs)   # authoritative set: a claim with no attrs clears them
     repo.save_identity(identity)
     repo.set_lifecycle(asset_id, Lifecycle.ACTIVE)
     sink.emit(Event(asset_id, "identity.claimed", {"name": display_name}, actor))
@@ -55,6 +56,8 @@ def claim(repo: AssetRepo, sink: EventSink, asset_id: UUID, display_name: str,
 def rename(repo: AssetRepo, sink: EventSink, asset_id: UUID, new_name: str,
            actor: str, new_taxonomy: str | None = None) -> None:
     identity = repo.get_identity(asset_id)
+    if identity is None:
+        raise ValueError(f"cannot rename unknown asset {asset_id}")
     identity.display_name = new_name
     if new_taxonomy is not None:
         identity.taxonomy = new_taxonomy
@@ -110,7 +113,8 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
     rules.validate_relationship(r)
     repo.add_relationship(r)
     sink.emit(Event(frm, "relationship.added",
-                    {"to": str(to), "rel_type": rel_type.value, "binding_mode": binding_mode}, actor))
+                    {"to": str(to), "rel_type": rel_type.value,
+                     "binding_mode": binding_mode.value if binding_mode is not None else None}, actor))
 
 
 # ---------------------------------------------------------------------------
@@ -119,8 +123,12 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
 def set_binding(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID,
                 binding_mode: BindingMode, pinned_version: int | None = None) -> None:
     binding_mode = BindingMode(binding_mode)
+    edge = repo.get_edge(frm, to, RelType.DEPENDS_ON)
+    if edge is None:   # set_binding FLIPS an existing edge; it never creates one (relate does)
+        raise ValueError(f"no DEPENDS_ON edge {frm} -> {to} to set binding on")
     r = Relationship(from_asset=frm, to_asset=to, rel_type=RelType.DEPENDS_ON,
-                     binding_mode=binding_mode, pinned_version=pinned_version)
+                     binding_mode=binding_mode, pinned_version=pinned_version,
+                     attributes=edge.attributes)   # preserve any edge metadata
     rules.validate_relationship(r)
     repo.upsert_relationship(r)
     sink.emit(Event(frm, "binding.changed",
