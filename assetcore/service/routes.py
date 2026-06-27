@@ -109,7 +109,7 @@ def bind_runtime(asset_id: UUID, body: BindRuntimeRequest,
 def relate(body: RelateRequest, service: AssetcoreService = Depends(get_service),
            authority: str = Depends(auth.get_authority)) -> Response:
     try:
-        service.relate(body.from_asset, body.to_asset, body.rel_type, authority,
+        service.relate(body.from_asset, body.to_asset, body.rel_type, body.actor or authority,
                        body.binding_mode, body.pinned_version)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

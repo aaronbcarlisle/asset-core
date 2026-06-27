@@ -47,7 +47,7 @@ class RelateRequest(BaseModel):
     from_asset: UUID
     to_asset: UUID
     rel_type: RelType
-    actor: str
+    actor: str | None = None      # defaults to the authenticated authority
     binding_mode: BindingMode | None = None
     pinned_version: int | None = None
 

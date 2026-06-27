@@ -56,12 +56,19 @@ state — never build for weeks without something to smoke-test.
   saw catch-up replay (seq 1-3) then a live `declared` (seq 4). Nervous system
   real, no tools attached.
 
-## Phase 4 — Adapter SDK + contract tests
-- [ ] `sdk/client.py`, `dcc_adapter.py`, `engine_adapter.py`, `tracker_adapter.py`
-- [ ] `sdk/stamping.py` (+ SidecarStampMixin), `sdk/resolvers.py`
-- [ ] `tests/contract/` — the parameterized suite ANY adapter must pass
-- [ ] `FakeDCCAdapter` passes the full contract suite through the live service
-- **Done when:** integration shape proven with no real tool installed.
+## Phase 4 — Adapter SDK + contract tests  ✅
+- [x] `sdk/client.py`, `dcc_adapter.py`, `engine_adapter.py`, `tracker_adapter.py`
+- [x] `sdk/stamping.py` (StampConflict + guard + SidecarStampMixin), `sdk/resolvers.py`
+      (registry + LocalFileResolver; real Perforce/Git/S3/Unreal -> Phase 5)
+- [x] `tests/contract/` — the parameterized suite ANY adapter must pass, run
+      through a live (TestClient-backed) service
+- [x] `FakeDCCAdapter` **and** `FakeSidecarDCCAdapter` (two stamping mechanisms)
+      pass the full DCC contract; `FakeEngineAdapter` passes the engine contract
+- [x] SDK firewall test: sdk imports only stdlib + http, never core/app/infra
+      (source-level stand-in for the Phase-8 import-linter)
+- TrackerAdapter base shipped; its contract suite lands with Phase 7.
+- **Done when:** integration shape proven with no real tool installed. ✅ 20
+  contract tests green; the definition of "a correct adapter" is now executable.
 
 ## Phase 5 — First real DCC + engine
 - [ ] `integrations/maya.py` (DCCAdapter), `integrations/unreal.py` (EngineAdapter)
