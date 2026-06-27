@@ -6,6 +6,8 @@ runs the identical bodies against sqlite (and postgres when available). That a
 single set of assertions passes on every backend IS the proof that the port
 abstraction holds — storage is swappable without touching meaning.
 """
+import dataclasses
+
 from assetcore.app import verbs
 from assetcore.core.types import BindingMode, Lifecycle, RelType
 
@@ -110,7 +112,11 @@ def invariant_rename_does_not_touch_source_or_runtime(repo, sink):
     verbs.bind_source(repo, sink, a, "//depot/props/barrel.ma", "maya", 4101, "env_amy")
     verbs.bind_runtime(repo, sink, a, "/Game/Props/Barrel", "build_1")
     before = verbs.resolve(repo, a)
-    before_source, before_runtime = before["source"], before["runtime"]
+    # snapshot COPIES — InMemoryRepo returns live objects, so comparing the same
+    # reference would pass trivially; a copy makes this a real value comparison on
+    # every backend.
+    before_source = dataclasses.replace(before["source"])
+    before_runtime = dataclasses.replace(before["runtime"])
 
     verbs.rename(repo, sink, a, "Totally Different Name", "pat", new_taxonomy="props/new/place")
     after = verbs.resolve(repo, a)
