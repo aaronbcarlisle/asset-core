@@ -1,5 +1,7 @@
 pytest>=8.0
-# optional, for the production backend:
+# service layer (Phase 3): FastAPI app + CLI + TestClient
+fastapi>=0.110
+uvicorn>=0.27
+httpx>=0.27
+# optional, for the production Postgres backend:
 # psycopg2-binary>=2.9
-# fastapi>=0.110
-# uvicorn>=0.27

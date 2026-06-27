@@ -39,12 +39,22 @@ state — never build for weeks without something to smoke-test.
 - **Done when:** identical tests pass across the runnable backends (proves the
   port). ✅ in-memory + sqlite; postgres ready on a live DSN.
 
-## Phase 3 — The service (the only door)
-- [ ] `service/` FastAPI exposing every verb; `auth.py` per authority
-- [ ] `infra/notify_sink.py` (LISTEN/NOTIFY) + SSE/WebSocket fan-out
-- [ ] `cli/assetcore_cli.py`
+## Phase 3 — The service (the only door)  ✅ (with one deferral)
+- [x] `service/` FastAPI exposing every verb; `auth.py` per authority
+      (token->authority; claim/rename=production, bind_source=artist,
+      bind_runtime=engine|build, relate/set_binding=any, reads open)
+- [x] `app/services.py` (the Phase-2 deferral) — composition seam routes depend on
+- [x] SSE event fan-out via `infra/broadcast_sink.py` (in-process, durable log +
+      catch-up replay). **`infra/notify_sink.py` (Postgres LISTEN/NOTIFY) deferred
+      to Phase 8** event hardening (needs a live Postgres); same EventSink port,
+      swaps in unchanged.
+- [x] `cli/assetcore_cli.py` (declare/bind-source/relate/resolve/subscribe)
+- [x] `service/schemas.py` — typed wire models incl. ResolveResponse
+      (closes the Phase-1 untyped-resolve flag)
 - **Done when:** declare/bind/relate/resolve from terminal; second terminal
-  `subscribe` prints events live. Nervous system real, no tools attached.
+  `subscribe` prints events live. ✅ Demonstrated: uvicorn + CLI, a subscriber
+  saw catch-up replay (seq 1-3) then a live `declared` (seq 4). Nervous system
+  real, no tools attached.
 
 ## Phase 4 — Adapter SDK + contract tests
 - [ ] `sdk/client.py`, `dcc_adapter.py`, `engine_adapter.py`, `tracker_adapter.py`

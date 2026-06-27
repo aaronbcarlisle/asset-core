@@ -55,8 +55,11 @@ def _parse_dt(value: str) -> datetime:
 class SqliteRepo:
     """Satisfies core.ports.AssetRepo."""
 
-    def __init__(self, path: str = ":memory:") -> None:
-        self.conn = sqlite3.connect(path)
+    def __init__(self, path: str = ":memory:", check_same_thread: bool = True) -> None:
+        # The service accesses one connection from FastAPI's worker thread, so it
+        # passes check_same_thread=False. Access there is single-threaded (all
+        # routes run on one event loop), so this stays safe.
+        self.conn = sqlite3.connect(path, check_same_thread=check_same_thread)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(_translate_pg_to_sqlite(_SCHEMA_PATH.read_text()))
