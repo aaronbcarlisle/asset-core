@@ -2,7 +2,7 @@
 name = "assetcore"
 version = "0.1.0"
 description = "Identity-first asset management for game & film production pipelines"
-requires-python = ">=3.10"
+requires-python = ">=3.11"  # tomllib (config layer, sdk/settings.py) is stdlib only on 3.11+
 dependencies = [
     "pytest>=9.1.1",
 ]

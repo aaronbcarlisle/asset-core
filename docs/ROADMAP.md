@@ -136,16 +136,38 @@ state — never build for weeks without something to smoke-test.
 - **Done when:** coverage enforced + monitored, DB recoverable, latency in budget.
   ✅ here for everything not requiring a live Postgres / real DCC.
 
+## Phase 9 — Configuration-driven provider layer  ✅
+- [x] Generic capability/provider registry `sdk/providers.py` (generalizes
+      `ResolverRegistry`): capability → {name → factory}, chosen by config not code.
+- [x] `sdk/settings.py` — loads `assetcore.toml`, expands `${ENV}` at load (secrets
+      stay out of the file), builds cached providers by capability+instance.
+      (Capability/section mapping is explicit per accessor — fixes the draft's
+      `rstrip("s")` charset-strip bug that broke `source_vcs`.)
+- [x] `integrations/jira.py` (`JiraAdapter`, ≤50 lines) as the proof-of-swap —
+      ShotGrid↔Jira is one new L4 file + a toml edit; nothing below L4 moves.
+- [x] ShotGrid + repo (sqlite/postgres/memory) providers registered; `service/app.py`
+      builds its default repo through the registry (`ASSETCORE_CONFIG`), retiring the
+      last hard-coded backend default — no `if/elif` in the composition root.
+- [x] `assetcore.toml` — the single studio service-selection surface.
+- [x] Contract test `tests/contract/test_providers.py`: registry mechanics + the
+      ShotGrid↔Jira **config-only swap** (identical app code) + `${ENV}` expansion +
+      tracker-stays-a-view. Firewall still **3 kept / 0 broken**.
+- [x] Folded in audit cleanup: contract conftest `importorskip("fastapi")` so a bare
+      install skips instead of erroring; `requires-python` bumped to `>=3.11` (tomllib).
+- **Out of scope (deferred):** unifying `ResolverRegistry` into the new registry;
+      wiring Perforce/git/runtime resolvers as providers; startup config validation.
+
 ---
 
-## Status: phases 1–8 complete
+## Status: phases 1–9 complete
 
 Core is stable and tool-agnostic; adding a tool is a contract-tested L4 adapter
 (proven by the Phase-6 diff touching only integrations/); the parallel-handoff
 bottleneck is gone (float/pin + event spine); identity never decays into paths;
-the system is observable, gated, and recoverable. Remaining work is operational
-(run against real Postgres + real Maya/Unreal/Substance on iron) — staged behind
-skips, not architecture.
+the system is observable, gated, and recoverable. Swapping any backing service —
+tracker, storage repo — is now a `assetcore.toml` edit, not code (Phase 9).
+Remaining work is operational (run against real Postgres + real Maya/Unreal/
+Substance on iron) — staged behind skips, not architecture.
 
 ## Standing risks (carry forward — ARCHITECTURE Part 7.3 / Part 11)
 

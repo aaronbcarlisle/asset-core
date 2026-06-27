@@ -42,22 +42,27 @@ def _imported_modules(path: pathlib.Path) -> set[str]:
     return names
 
 
-def _offenders_in(directory: pathlib.Path, allowed_prefix: str) -> dict:
+def _offenders_in(directory: pathlib.Path, allowed_prefixes: tuple[str, ...]) -> dict:
+    def ok(m: str) -> bool:
+        return any(m == p or m.startswith(p + ".") for p in allowed_prefixes)
+
     offenders = {}
     for py in directory.rglob("*.py"):
         bad = {m for m in _imported_modules(py)
-               if m.startswith("assetcore.")
-               and not (m == allowed_prefix or m.startswith(allowed_prefix + "."))}
+               if m.startswith("assetcore.") and not ok(m)}
         if bad:
             offenders[str(py.relative_to(directory))] = sorted(bad)
     return offenders
 
 
 def test_sdk_imports_only_stdlib_and_http():
-    offenders = _offenders_in(_SDK_DIR, "assetcore.sdk")
+    offenders = _offenders_in(_SDK_DIR, ("assetcore.sdk",))
     assert offenders == {}, f"SDK reached past the HTTP boundary into the core: {offenders}"
 
 
 def test_integrations_import_only_the_sdk():
-    offenders = _offenders_in(_INTEGRATIONS_DIR, "assetcore.sdk")
+    # an integration may import the SDK and its SIBLINGS (same L4 layer, e.g. the
+    # _register aggregator) — the canonical import-linter contract forbids only an
+    # inward reach into core/app/infra/service, and this backstop matches it.
+    offenders = _offenders_in(_INTEGRATIONS_DIR, ("assetcore.sdk", "assetcore.integrations"))
     assert offenders == {}, f"an integration reached past the SDK into the core: {offenders}"
