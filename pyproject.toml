@@ -3,13 +3,57 @@ name = "assetcore"
 version = "0.1.0"
 description = "Identity-first asset management for game & film production pipelines"
 requires-python = ">=3.10"
-dependencies = []
+dependencies = [
+    "pytest>=9.1.1",
+]
 
 [project.optional-dependencies]
 postgres = ["psycopg2-binary>=2.9"]
-service = ["fastapi>=0.110", "uvicorn>=0.27"]
-dev = ["pytest>=8.0"]
+service = ["fastapi>=0.110", "uvicorn>=0.27", "httpx>=0.27"]
+migrations = ["alembic>=1.13", "sqlalchemy>=2.0"]
+dev = ["pytest>=8.0", "fastapi>=0.110", "uvicorn>=0.27", "httpx>=0.27",
+       "import-linter>=2.0", "alembic>=1.13", "sqlalchemy>=2.0"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+# The dependency firewall, mechanically enforced (ARCHITECTURE Part 8).
+# Run: `lint-imports`. This is the canonical gate; the source-scan tests in
+# tests/contract/test_sdk_firewall.py are a zero-dependency backstop.
+[tool.importlinter]
+root_package = "assetcore"
+
+[[tool.importlinter.contracts]]
+name = "Inward-only layering (service -> infra -> app -> core)"
+type = "layers"
+layers = [
+    "assetcore.service",
+    "assetcore.infra",
+    "assetcore.app",
+    "assetcore.core",
+]
+# the SDK + integrations sit outside the inward stack; they are constrained below.
+exhaustive = false
+
+[[tool.importlinter.contracts]]
+name = "SDK talks only over HTTP (never the core)"
+type = "forbidden"
+source_modules = ["assetcore.sdk"]
+forbidden_modules = [
+    "assetcore.core",
+    "assetcore.app",
+    "assetcore.infra",
+    "assetcore.service",
+]
+
+[[tool.importlinter.contracts]]
+name = "Integrations import only the SDK"
+type = "forbidden"
+source_modules = ["assetcore.integrations"]
+forbidden_modules = [
+    "assetcore.core",
+    "assetcore.app",
+    "assetcore.infra",
+    "assetcore.service",
+]
