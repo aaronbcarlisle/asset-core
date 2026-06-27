@@ -9,6 +9,7 @@ Firewall (Part 8): imports only the SDK, never core/app/infra/service.
 """
 from __future__ import annotations
 
+import re
 import subprocess
 from typing import Protocol
 
@@ -34,20 +35,25 @@ class _RealBlenderScene:
     def __init__(self) -> None:
         import bpy  # noqa: PLC0415 — must be lazy; absent outside Blender
         self._bpy = bpy
+        self._current: str | None = None
 
     def open_or_new(self, path: str) -> None:
         import os
+        if path == self._current:
+            return   # already open — don't reload and drop the in-memory custom property
         if os.path.exists(path):
             self._bpy.ops.wm.open_mainfile(filepath=path)
         else:
             self._bpy.ops.wm.read_homefile(use_empty=True)
             self._bpy.ops.wm.save_as_mainfile(filepath=path)
+        self._current = path
 
     def prop_get(self, key: str) -> str | None:
         return self._bpy.context.scene.get(key)
 
     def prop_set(self, key: str, value: str) -> None:
         self._bpy.context.scene[key] = value
+        self._bpy.ops.wm.save_mainfile()   # persist the stamp to disk so it round-trips
 
 
 class _RealBlenderVcs:
@@ -58,6 +64,9 @@ class _RealBlenderVcs:
 
     def location(self, local_path: str) -> str:
         remote = self._git("config", "--get", "remote.origin.url") or "local"
+        # strip any userinfo (https://token@host, https://user:pass@host) so a
+        # credential in the remote URL never leaks into stored location metadata
+        remote = re.sub(r"://[^/@]+@", "://", remote)
         return f"git://{remote}@{self.revision(local_path)}/{local_path}"
 
     def revision(self, local_path: str) -> str:

@@ -117,11 +117,16 @@ class _CurrentDocStore:
         self._docs.setdefault(path, {})
         self._current = path
 
+    def _doc(self) -> dict[str, str]:
+        if self._current is None:
+            raise RuntimeError("no document open; call open_or_new(path) first")
+        return self._docs[self._current]
+
     def _get(self, key: str) -> str | None:
-        return self._docs[self._current].get(key)
+        return self._doc().get(key)
 
     def _set(self, key: str, value: str) -> None:
-        self._docs[self._current][key] = value
+        self._doc()[key] = value
 
 
 class FakeBlenderScene(_CurrentDocStore):
