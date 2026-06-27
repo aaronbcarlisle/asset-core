@@ -157,9 +157,26 @@ state — never build for weeks without something to smoke-test.
 - **Out of scope (deferred):** unifying `ResolverRegistry` into the new registry;
       wiring Perforce/git/runtime resolvers as providers; startup config validation.
 
+## Phase 10 — Startup config validation  ✅
+- [x] `Settings.validate(capabilities=None)` — fail-fast on a bad `assetcore.toml`
+      at startup, not at first use. Aggregates **every** problem into one
+      `ConfigError`: unknown sections, unknown provider names (with `available()`),
+      missing required config keys, and required keys that are empty / an unset
+      `${ENV}` ref. Optional keys (sqlite `path` → `:memory:`) may be empty.
+- [x] Providers declare needed keys at registration (`@register(cap, name,
+      requires=[...])`) so validation stays generic — the config layer never learns a
+      provider's internals (`providers.required_keys`).
+- [x] Composition root runs it: `service/app.py` validates `["repo"]`;
+      `scripts/validate_config.py` (imports every registration) validates the WHOLE
+      file for CI / pre-deploy. Default scope = capabilities with a registered
+      provider, so describe-only sections (source_vcs/runtime_store) don't false-fail.
+- [x] Tests in `tests/contract/test_providers.py` (unknown provider/section, missing
+      key, unset-required-env vs empty-optional-env, capability scoping, aggregation,
+      script exit codes). Firewall still **3 kept / 0 broken**.
+
 ---
 
-## Status: phases 1–9 complete
+## Status: phases 1–10 complete
 
 Core is stable and tool-agnostic; adding a tool is a contract-tested L4 adapter
 (proven by the Phase-6 diff touching only integrations/); the parallel-handoff

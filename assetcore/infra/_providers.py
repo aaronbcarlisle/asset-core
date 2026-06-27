@@ -32,7 +32,7 @@ def _build_memory(config):
     return InMemoryRepo()
 
 
-@providers.register("repo", "postgres")
+@providers.register("repo", "postgres", requires=["dsn"])
 def _build_postgres(config):
     # lazy so a missing psycopg2 surfaces only when postgres is actually selected
     from assetcore.infra.postgres_repo import PostgresRepo  # noqa: PLC0415

@@ -34,7 +34,9 @@ def create_app(
         cfg_path = os.environ.get("ASSETCORE_CONFIG")
         if cfg_path:
             from assetcore.sdk.settings import Settings
-            repo = Settings.load(cfg_path).repo("main")
+            settings = Settings.load(cfg_path)
+            settings.validate(["repo"])   # fail fast on a bad repo config at startup
+            repo = settings.repo("main")
         else:
             repo = providers.build("repo", "sqlite",
                                    {"path": os.environ.get("ASSETCORE_SQLITE_PATH", ":memory:")})
