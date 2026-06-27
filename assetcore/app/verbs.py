@@ -27,6 +27,12 @@ from assetcore.core.types import BindingMode, Lifecycle, RelType
 # ---------------------------------------------------------------------------
 def declare(repo: AssetRepo, sink: EventSink, asset_type: str, created_by: str,
             origin: dict | None = None) -> UUID:
+    """Summon an asset into existence; return its durable provisional UUID.
+
+    The asset is born PROVISIONAL with an empty identity facet already attached
+    (ready for backfill). `origin` records free-form birth context (shot, dcc, …)
+    that `find_similar` and the worklist use later. Emits a ``declared`` event.
+    """
     asset = Asset(asset_type=asset_type, created_by=created_by, origin=origin or {})
     identity = IdentityFacet(asset_id=asset.id)   # facet exists from birth, for backfill
     repo.create_asset(asset, identity)
@@ -39,6 +45,13 @@ def declare(repo: AssetRepo, sink: EventSink, asset_type: str, created_by: str,
 # ---------------------------------------------------------------------------
 def claim(repo: AssetRepo, sink: EventSink, asset_id: UUID, display_name: str,
           taxonomy: str, actor: str, **attrs) -> None:
+    """Production gives a provisional asset meaning — the backfill step.
+
+    Sets the identity facet's display name + taxonomy and flips lifecycle to
+    ACTIVE. ``**attrs`` is an authoritative set of identity attributes (a claim
+    with none clears them). Raises ``ValueError`` if the asset is unknown. Emits
+    an ``identity.claimed`` event.
+    """
     identity = repo.get_identity(asset_id)
     if identity is None:
         raise ValueError(f"cannot claim unknown asset {asset_id}")
@@ -55,6 +68,13 @@ def claim(repo: AssetRepo, sink: EventSink, asset_id: UUID, display_name: str,
 # ---------------------------------------------------------------------------
 def rename(repo: AssetRepo, sink: EventSink, asset_id: UUID, new_name: str,
            actor: str, new_taxonomy: str | None = None) -> None:
+    """Relabel the identity facet ONLY — no file moves, no engine changes.
+
+    The headline guarantee that identity is not the path: a rename touches one
+    facet. Pass ``new_taxonomy`` to also re-file it taxonomically (still no bytes
+    move). Raises ``ValueError`` if unknown. Emits an ``identity.renamed`` event.
+    To move the bytes instead, see :func:`relocate`.
+    """
     identity = repo.get_identity(asset_id)
     if identity is None:
         raise ValueError(f"cannot rename unknown asset {asset_id}")
@@ -70,6 +90,13 @@ def rename(repo: AssetRepo, sink: EventSink, asset_id: UUID, new_name: str,
 # ---------------------------------------------------------------------------
 def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: str,
                 tool: str, revision: str, published_by: str) -> int:
+    """The artist/DCC publishes authored truth — write the SOURCE facet.
+
+    Adds a new source version (a pointer; ``location_uri`` is opaque, ``revision``
+    a string) and returns its monotonic version number. The prior latest is
+    demoted as part of the same write (the ``one_latest_source`` invariant). Emits
+    a ``source.published`` event.
+    """
     v = rules.next_version_num(repo.source_versions(asset_id))
     # The repo demotes the prior latest as part of the write (the schema's
     # one_latest_source unique index forces demote-then-insert atomically).
@@ -87,6 +114,12 @@ def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: 
 # ---------------------------------------------------------------------------
 def bind_runtime(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: str,
                  build_id: str) -> int:
+    """The build/engine reports where the cooked asset lives — write RUNTIME.
+
+    Adds a new runtime version and returns its version number; the prior latest is
+    demoted at write time (the ``one_latest_runtime`` invariant). Emits a
+    ``runtime.cooked`` event.
+    """
     v = rules.next_version_num(repo.runtime_versions(asset_id))
     # one_latest_runtime invariant is enforced at write time by the repo.
     repo.add_runtime_version(RuntimeVersion(
@@ -104,6 +137,15 @@ def bind_runtime(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri:
 def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelType,
            actor: str, binding_mode: BindingMode | None = None,
            pinned_version: int | None = None) -> None:
+    """Assert a NEW typed edge ``frm -> to``.
+
+    ``binding_mode``/``pinned_version`` are valid only on DEPENDS_ON. For
+    DERIVED_FROM the edge records the parent's current source version, so
+    :func:`stale_derivations` can flag it once the parent advances. The edge is
+    validated (self-edges and a binding_mode on a non-DEPENDS_ON edge raise
+    ``ValueError``). Emits a ``relationship.added`` event. Flipping an existing
+    edge float↔pin is :func:`set_binding`, not this.
+    """
     rel_type = RelType(rel_type)
     if binding_mode is not None:
         binding_mode = BindingMode(binding_mode)
@@ -129,6 +171,12 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
 # ---------------------------------------------------------------------------
 def set_binding(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID,
                 binding_mode: BindingMode, pinned_version: int | None = None) -> None:
+    """Flip an EXISTING DEPENDS_ON edge between float and pin (the consumer's call).
+
+    ``float`` always resolves to the latest authored version; ``pin`` locks to a
+    specific one. Raises ``ValueError`` if there's no such edge (use :func:`relate`
+    to create one). Emits a ``binding.changed`` event.
+    """
     binding_mode = BindingMode(binding_mode)
     edge = repo.get_edge(frm, to, RelType.DEPENDS_ON)
     if edge is None:   # set_binding FLIPS an existing edge; it never creates one (relate does)
@@ -147,6 +195,11 @@ def set_binding(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID,
 # RESOLVE — UUID -> all three facets (the single lookup that replaces the dig).
 # ---------------------------------------------------------------------------
 def resolve(repo: AssetRepo, asset_id: UUID) -> dict:
+    """UUID -> all three facets in one lookup (the read that replaces the dig).
+
+    Returns a dict with ``meta`` (the Asset), ``identity``, the latest ``source``
+    version, and the latest ``runtime`` version. Any facet may be ``None``.
+    """
     source = next((v for v in repo.source_versions(asset_id) if v.is_latest), None)
     runtime = next((v for v in repo.runtime_versions(asset_id) if v.is_latest), None)
     return {
@@ -162,6 +215,12 @@ def resolve(repo: AssetRepo, asset_id: UUID) -> dict:
 # RESOLVE_DEPENDENCY — a DEPENDS_ON edge -> the exact source version to load.
 # ---------------------------------------------------------------------------
 def resolve_dependency(repo: AssetRepo, frm: UUID, to: UUID) -> SourceVersion | None:
+    """A DEPENDS_ON edge -> the exact source version the consumer should load.
+
+    The pin if the edge is pinned, else the current latest. Returns ``None`` if
+    there's no such edge or no matching version. The float/pin decision itself is
+    the pure :func:`assetcore.core.rules.resolve_dependency_version`.
+    """
     edge = repo.get_edge(frm, to, RelType.DEPENDS_ON)
     if edge is None:
         return None

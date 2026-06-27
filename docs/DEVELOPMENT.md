@@ -10,6 +10,10 @@ If you are new here, read in this order:
 3. **This file** — how to actually work in the tree.
 4. [`COOKBOOK.md`](COOKBOOK.md) — copy-paste examples for every capability.
 
+The **API Reference** (signatures + docstrings for every module) is generated from
+the source and browsable in the built site — see [§12](#12-building-the-docs-site)
+to build it locally with `mkdocs serve`.
+
 Reference docs: [`PIPELINE_MODEL.md`](PIPELINE_MODEL.md) (disciplines & relationships),
 [`CLI.md`](CLI.md), [`PROVIDER_LAYER.md`](PROVIDER_LAYER.md) (config/swap),
 [`OPERATIONS.md`](OPERATIONS.md) (firewall/migrations/backup), [`LIVE_PROVING.md`](LIVE_PROVING.md)
@@ -34,12 +38,13 @@ pip install -e .
 # the HTTP service + SDK client (FastAPI, uvicorn, httpx)
 pip install -e ".[service]"
 
-# everything a contributor needs (service + import-linter + alembic + sqlalchemy)
+# everything a contributor needs (service + import-linter + alembic + sqlalchemy + docs)
 pip install -e ".[dev]"
 
 # optional targets
 pip install -e ".[postgres]"     # psycopg2 for the Postgres backend
 pip install -e ".[migrations]"   # alembic + sqlalchemy
+pip install -e ".[docs]"         # mkdocs-material + mkdocstrings (the docs site)
 ```
 
 The extras map (see `pyproject.toml`):
@@ -50,6 +55,7 @@ The extras map (see `pyproject.toml`):
 | `service` | fastapi, uvicorn, httpx | the L2 service, the SDK client, the CLI's live commands |
 | `postgres` | psycopg2-binary | the Postgres repo |
 | `migrations` | alembic, sqlalchemy | managed schema migrations |
+| `docs` | mkdocs-material, mkdocstrings[python] | building the documentation site (§12) |
 | `dev` | all of the above + import-linter | full contributor workflow |
 
 ---
@@ -358,3 +364,39 @@ only when asked. Keep the firewall green and the suite passing in every commit.
 | change the data model | `core/entities.py` + `core/types.py` + `db/schema.sql` + a migration |
 
 For copy-paste usage of every capability above, see **[`COOKBOOK.md`](COOKBOOK.md)**.
+
+---
+
+## 12. Building the docs site
+
+The documentation is a [MkDocs](https://www.mkdocs.org/) site
+([Material](https://squidfunk.github.io/mkdocs-material/) theme). The narrative docs
+are the Markdown files in `docs/`; the **API Reference is generated from the package
+docstrings** by [mkdocstrings](https://mkdocstrings.github.io/) at build time, so it
+tracks the code automatically — write a good docstring and it shows up.
+
+```bash
+pip install -e ".[docs]"     # or: pip install -r docs/requirements.txt
+
+mkdocs serve                 # live-reload preview at http://127.0.0.1:8000
+mkdocs build --strict        # render to ./site (--strict fails on broken links/refs)
+```
+
+How it's wired (`mkdocs.yml` at the repo root):
+
+- **`plugins: mkdocstrings`** — the `python` handler statically introspects the
+  `assetcore` package (via [griffe](https://mkdocstrings.github.io/griffe/) — no
+  imports executed, so lazy tool/COM imports never fire). Private (`_`-prefixed)
+  members are hidden.
+- **`docs/api/*.md`** — one page per layer, each just a few `::: assetcore.<module>`
+  directives. To document a **new module**, add a `::: assetcore.<pkg>.<module>` line
+  to the relevant page (and a `nav:` entry if it's a new layer).
+- **`toc.slugify`** is set to the GFM-compatible slugifier so in-page anchor links
+  resolve identically on GitHub and in the rendered site.
+
+Keep `mkdocs build --strict` green: it's the gate that catches a broken cross-link
+or a `:::` pointing at a renamed module. The generated `site/` is git-ignored.
+
+> **Publishing (optional, not yet wired):** `mkdocs gh-deploy` pushes `site/` to a
+> `gh-pages` branch for GitHub Pages; a CI job running `mkdocs build --strict` on PRs
+> (and `gh-deploy` on `main`) is the natural next step when you want it hosted.

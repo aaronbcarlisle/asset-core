@@ -410,7 +410,7 @@ assetcore relocate <id> /Game/Env/Props/Barrel.uasset --actor pat --facet runtim
 
 Relocating a facet that doesn't exist yet → **400** ("no source facet to relocate").
 For directory-wide moves across many assets, see
-[production tools](#production-tools-impact-previewed-moves).
+[production tools](#5-production-tools-impact-previewed-moves).
 
 ### Deprecate
 

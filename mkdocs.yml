@@ -1,0 +1,106 @@
+site_name: assetcore
+site_description: Identity-first asset management for game & film production pipelines
+repo_url: https://github.com/aaronbcarlisle/asset-core
+repo_name: asset-core
+docs_dir: docs
+site_dir: site
+
+# The API Reference is generated from the package docstrings at build time, so it
+# tracks the code: `mkdocs serve` live-reloads on edits, `mkdocs build` emits site/.
+# Narrative docs (Design, Architecture, Cookbook, ...) are the same Markdown files
+# that live in docs/, rendered into the same site.
+
+theme:
+  name: material
+  features:
+    - navigation.sections
+    - navigation.top
+    - navigation.indexes
+    - content.code.copy
+    - content.code.annotate
+    - toc.follow
+    - search.suggest
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: blue grey
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: blue grey
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+plugins:
+  - search
+  - mkdocstrings:
+      default_handler: python
+      handlers:
+        python:
+          paths: ["."]            # find the `assetcore` package from the repo root
+          options:
+            docstring_style: google
+            docstring_section_style: list
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            separate_signature: true
+            show_signature_annotations: true
+            signature_crossrefs: true
+            merge_init_into_class: true
+            filters: ["!^_"]        # hide private (underscore) members by default
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+      # GitHub-compatible heading slugs, so the same in-page links resolve both on
+      # GitHub and in the rendered site (default mkdocs slugs differ on " / " / " & ").
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: README.md
+  - Why & Design:
+      - Design (read first): DESIGN.md
+      - Architecture: ARCHITECTURE.md
+      - Pipeline Model: PIPELINE_MODEL.md
+  - Using assetcore:
+      - Cookbook: COOKBOOK.md
+      - CLI: CLI.md
+  - Building & Operating:
+      - Development Guide: DEVELOPMENT.md
+      - Provider Layer: PROVIDER_LAYER.md
+      - Operations: OPERATIONS.md
+      - Live Proving: LIVE_PROVING.md
+  - API Reference:
+      - Overview: api/index.md
+      - core — L0 (domain): api/core.md
+      - app — L1 (verbs): api/app.md
+      - infra — L1 (adapters): api/infra.md
+      - service — L2 (the door): api/service.md
+      - sdk — L3 (the contract): api/sdk.md
+      - integrations — L4 (tools): api/integrations.md
+  - Project:
+      - Roadmap: ROADMAP.md
+      - Phase 1 notes: PHASE1.md
