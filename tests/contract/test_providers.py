@@ -1,4 +1,4 @@
-"""Provider layer contract (Phase 7) — registry mechanics + config-only swap.
+"""Provider layer contract (Phase 9) — registry mechanics + config-only swap.
 
 These tests need NO service: the registry and settings layers are pure SDK +
 stdlib. The headline is the swap test — the SAME application line

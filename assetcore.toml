@@ -37,7 +37,7 @@ api_key     = "${SHOTGRID_API_KEY}"
 
 # --- source / runtime stores: DESCRIBED here for completeness ------------------
 # (Perforce/git resolvers still route through ResolverRegistry today; wiring them
-#  into this registry is a follow-up — see docs/PHASE7 "out of scope".)
+#  into this registry is a follow-up — see docs/PROVIDER_LAYER.md "Deferred".)
 [source_vcs.main]
 provider = "perforce"
 [source_vcs.main.config]

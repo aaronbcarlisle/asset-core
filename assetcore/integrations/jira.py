@@ -81,4 +81,12 @@ class JiraAdapter(TrackerAdapter):
 
 @providers.register("tracker", "jira")
 def _build_jira(config, client):
-    return JiraAdapter(client, _RealJiraSite(**config))
+    # pass only known keys (like the shotgrid factory) — robust to leftover keys
+    # (e.g. a stale script_name/api_key) after a partial ShotGrid->Jira config swap.
+    site = _RealJiraSite(
+        base_url=config["base_url"],
+        email=config["email"],
+        api_token=config["api_token"],
+        project=config["project"],
+    )
+    return JiraAdapter(client, site)
