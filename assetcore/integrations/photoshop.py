@@ -10,8 +10,12 @@ and `p4 move`); the source location/revision come from the Perforce workspace.
 Everything tool-agnostic (publish, reference, the stamp-overwrite guard) is
 inherited from DCCAdapter — this file is only the four Photoshop-specific methods,
 reached through injectable seams so the adapter is testable headless and imports
-cleanly without Photoshop (the `photoshop`/`p4` access is lazy). The seam shape is
+cleanly without Photoshop (the COM/`p4` access is lazy). The seam shape is
 identical to Maya's/Max's, so it passes the SAME DCC contract — no change below L4.
+
+The real seam drives the generic `Photoshop.Application` COM ProgID via comtypes
+(version-agnostic — proven live against Photoshop 2026), doing every op through
+DoJavaScript so there's no dependence on a version-specific Python binding.
 
 Firewall (Part 8): imports only the SDK, never core/app/infra/service.
 """
@@ -67,35 +71,46 @@ _JSX_GET = """
   return (p && p.value) ? p.value : "";   // XMPProperty stores the text on .value
 })(%(key)s);
 """
+_JSX_OPEN = """
+(function(p) {
+  var f = new File(p);
+  if (f.exists) { app.open(f); }
+  else { var d = app.documents.add(512, 512, 72, f.name);
+         d.saveAs(f, new PhotoshopSaveOptions(), false); }
+})(%(path)s);
+"""
 
 
 class _RealPhotoshopDoc:
-    """Wraps the Photoshop COM app (photoshop-python-api; imported lazily)."""
+    """Drives Photoshop via the generic COM ProgID (comtypes), version-agnostic.
+
+    Uses `Photoshop.Application` directly rather than photoshop-python-api's version
+    detection (whose version map lags new releases — it can't resolve PS 2026 even
+    though the COM server is registered). Every operation goes through DoJavaScript,
+    so there's no dependence on a specific Photoshop object-model binding.
+    """
 
     def __init__(self) -> None:
-        import photoshop.api as ps  # noqa: PLC0415 — lazy; absent without Photoshop
-        self._ps = ps
-        self._app = ps.Application()
+        from comtypes.client import CreateObject  # noqa: PLC0415 — lazy; needs Photoshop COM
+        self._app = CreateObject("Photoshop.Application")
         self._current: str | None = None
+
+    def _jsx(self, code: str) -> str:
+        return self._app.DoJavaScript(code) or ""
 
     def open_or_new(self, path: str) -> None:
         if path == self._current:
             return
-        if os.path.exists(path):
-            self._app.open(path)
-        else:
-            doc = self._app.documents.add(512, 512, 72, os.path.basename(path))
-            doc.saveAs(path, self._ps.PhotoshopSaveOptions(), asCopy=False)
+        self._jsx(_JSX_OPEN % {"path": json.dumps(path)})
         self._current = path
 
     def file_info_get(self, key: str) -> str | None:
-        out = self._app.doJavaScript(
-            _JSX_GET % {"ns": json.dumps(_XMP_NS), "key": json.dumps(key)})
+        out = self._jsx(_JSX_GET % {"ns": json.dumps(_XMP_NS), "key": json.dumps(key)})
         return out or None
 
     def file_info_set(self, key: str, value: str) -> None:
-        self._app.doJavaScript(_JSX_SET % {
-            "ns": json.dumps(_XMP_NS), "key": json.dumps(key), "val": json.dumps(value)})
+        self._jsx(_JSX_SET % {"ns": json.dumps(_XMP_NS),
+                              "key": json.dumps(key), "val": json.dumps(value)})
 
 
 class _RealPhotoshopVcs:
