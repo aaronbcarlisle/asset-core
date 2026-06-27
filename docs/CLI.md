@@ -34,11 +34,19 @@ Run as the installed console script `assetcore …`, or `python -m assetcore.sdk
 | `worklist` | open | provisional backfill queue (oldest first) |
 | `move <id> --actor [--name][--taxonomy][--source][--source-rev][--runtime] [--yes]` | production | **rename + relocate in one op**, with an impact preview; omit `--yes` for preview only |
 | `relocate-prefix <old> <new> --ids a,b,c --actor [--yes]` | any | **directory move**: remap a path prefix across many assets; omit `--yes` for preview |
+| `open-source <id> [--fetch]` | open | the asset's authored source URI; `--fetch` materializes it locally via the resolver (the artist "open source" jump) |
+| `subscribe [--after N] [--limit N]` | open | tail the event spine (SSE): catch-up replay then live follow |
 
 `move` and `relocate-prefix` are the production rename/relocate tool: they print the
 impact (transitive dependents) first and only mutate when you pass `--yes` — safe by
 default. They wrap `assetcore.sdk.tools` (`impact_report`, `rename_relocate`,
-`relocate_prefix`), which a GUI could reuse.
+`relocate_prefix`, `fetch_source`), which a GUI could reuse.
+
+**Event-driven automation** — `subscribe` tails the spine; for recipes, build on
+`assetcore.sdk.automation.EventRouter`: register handlers (`@router.on("source.published")`,
+`"*"` for all) and feed it `stream_events(url, token)`. This is where asset
+management becomes pipeline — on publish notify the tracker / queue a cook, on claim
+mirror to ShotGrid — with the core never learning the recipe. See `scripts/demo_automation.py`.
 
 ## Examples
 ```bash

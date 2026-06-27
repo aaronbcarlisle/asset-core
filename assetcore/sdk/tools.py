@@ -14,6 +14,27 @@ GUI could be another — the logic lives here, tested once.
 from __future__ import annotations
 
 from assetcore.sdk.client import AssetcoreClient
+from assetcore.sdk.resolvers import ResolverRegistry, default_registry
+
+
+def source_location(client: AssetcoreClient, asset_id: str) -> str | None:
+    """The authored-source URI for an asset (the 'where is the source?' lookup)."""
+    src = client.resolve(asset_id).get("source")
+    return src["location_uri"] if src else None
+
+
+def fetch_source(client: AssetcoreClient, asset_id: str,
+                 registry: ResolverRegistry | None = None) -> str:
+    """Open Source: resolve the asset's source URI and materialize it locally via the
+    resolver registry, returning the local path to open in a DCC. The artist's
+    "jump from this runtime/engine asset back to the file that authored it" — the
+    URI is opaque to the core; the registry (Perforce/git/local) turns it into bytes.
+    Raises if the asset has no source facet.
+    """
+    uri = source_location(client, asset_id)
+    if uri is None:
+        raise ValueError(f"asset {asset_id} has no source facet to open")
+    return (registry or default_registry()).fetch(uri)
 
 
 def impact_report(client: AssetcoreClient, asset_id: str, rel_types=None,
