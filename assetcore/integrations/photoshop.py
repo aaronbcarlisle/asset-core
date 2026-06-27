@@ -17,6 +17,7 @@ Firewall (Part 8): imports only the SDK, never core/app/infra/service.
 """
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import tempfile
@@ -42,25 +43,28 @@ class PhotoshopVcs(Protocol):
 
 # JSX run via app.doJavaScript — XMP custom-namespace get/set is the scriptable way
 # to store durable custom metadata in a .psd (the AdobeXMPScript external object).
+# Every interpolated value is json.dumps()'d into a safe JS string literal (incl. the
+# quotes), so backslashes in Windows paths or quotes/backslashes in a value can't
+# break the JS — never hand-quote interpolated input.
 _JSX_SET = """
-(function(path, key, val) {
+(function(key, val) {
   if (ExternalObject.AdobeXMPScript == undefined)
     ExternalObject.AdobeXMPScript = new ExternalObject("lib:AdobeXMPScript");
   var xmp = new XMPMeta(activeDocument.xmpMetadata.rawData);
-  XMPMeta.registerNamespace("%(ns)s", "assetcore");
-  xmp.setProperty("%(ns)s", key, val);
+  XMPMeta.registerNamespace(%(ns)s, "assetcore");
+  xmp.setProperty(%(ns)s, key, val);
   activeDocument.xmpMetadata.rawData = xmp.serialize();
   activeDocument.save();
-})("%(path)s", "%(key)s", "%(val)s");
+})(%(key)s, %(val)s);
 """
 _JSX_GET = """
 (function(key) {
   if (ExternalObject.AdobeXMPScript == undefined)
     ExternalObject.AdobeXMPScript = new ExternalObject("lib:AdobeXMPScript");
   var xmp = new XMPMeta(activeDocument.xmpMetadata.rawData);
-  var p = xmp.getProperty("%(ns)s", key);
+  var p = xmp.getProperty(%(ns)s, key);
   return p ? String(p) : "";
-})("%(key)s");
+})(%(key)s);
 """
 
 
@@ -84,12 +88,13 @@ class _RealPhotoshopDoc:
         self._current = path
 
     def file_info_get(self, key: str) -> str | None:
-        out = self._app.doJavaScript(_JSX_GET % {"ns": _XMP_NS, "key": key})
+        out = self._app.doJavaScript(
+            _JSX_GET % {"ns": json.dumps(_XMP_NS), "key": json.dumps(key)})
         return out or None
 
     def file_info_set(self, key: str, value: str) -> None:
-        self._app.doJavaScript(
-            _JSX_SET % {"ns": _XMP_NS, "path": self._current, "key": key, "val": value})
+        self._app.doJavaScript(_JSX_SET % {
+            "ns": json.dumps(_XMP_NS), "key": json.dumps(key), "val": json.dumps(value)})
 
 
 class _RealPhotoshopVcs:
