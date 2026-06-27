@@ -6,6 +6,7 @@ __pycache__/
 .venv/
 venv/
 .env
+sg.env
 .idea/
 uv.lock
 .ruff_cache/
