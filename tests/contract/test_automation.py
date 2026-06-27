@@ -40,6 +40,8 @@ def test_router_run_respects_limit():
     got = []
     r.on("*", lambda e: got.append(e))
     assert r.run(iter([{"event_type": "x"}] * 5), limit=3) == 3 and len(got) == 3
+    got.clear()
+    assert r.run(iter([{"event_type": "x"}] * 5), limit=0) == 0 and got == []   # 0 means zero
 
 
 def test_parse_sse_reads_data_frames():

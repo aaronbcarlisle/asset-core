@@ -50,10 +50,10 @@ class EventRouter:
         N events (handy for tests / bounded runs). Returns events processed."""
         n = 0
         for ev in events:
+            if limit is not None and n >= limit:   # check before dispatch so limit=0 means zero
+                break
             self.dispatch(ev)
             n += 1
-            if limit is not None and n >= limit:
-                break
         return n
 
 
