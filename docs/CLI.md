@@ -32,6 +32,13 @@ Run as the installed console script `assetcore …`, or `python -m assetcore.sdk
 | `floating <id>` | open | DEPENDS_ON edges still floating (pin before ship) |
 | `find-similar <name> [--type]` | open | reuse-over-rebuild nudge (advisory) |
 | `worklist` | open | provisional backfill queue (oldest first) |
+| `move <id> --actor [--name][--taxonomy][--source][--source-rev][--runtime] [--yes]` | prod | **rename + relocate in one op**, with an impact preview; omit `--yes` for preview only |
+| `relocate-prefix <old> <new> --ids a,b,c --actor [--yes]` | any | **directory move**: remap a path prefix across many assets; omit `--yes` for preview |
+
+`move` and `relocate-prefix` are the production rename/relocate tool: they print the
+impact (transitive dependents) first and only mutate when you pass `--yes` — safe by
+default. They wrap `assetcore.sdk.tools` (`impact_report`, `rename_relocate`,
+`relocate_prefix`), which a GUI could reuse.
 
 ## Examples
 ```bash
