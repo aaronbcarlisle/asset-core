@@ -120,6 +120,26 @@ SG Asset in the target project) -> simulates a production rename in SG -> `apply
 (pulled back as an identity rename) -> `resolve()` confirms -> deletes the test
 Asset. Look for `[live-sg] PASS`.
 
-## 3ds Max
+## 3ds Max 2027 -> Perforce
 
-(added when proven)
+`pymxs` exists only inside a Max runtime, so this runs headless via `3dsmaxbatch`
+(like Unreal's editor commandlet). Max's bundled python (3.13) has no `pip` by
+default — bootstrap it once with `ensurepip`, then install `httpx` beside the repo
+in `max-deps/` (the driver adds it to `sys.path`; `p4` is found via `P4_BIN`).
+
+```bash
+MAXPY="/c/Program Files/Autodesk/3ds Max 2027/Python/python.exe"
+"$MAXPY" -m ensurepip
+"$MAXPY" -m pip install --target ../max-deps httpx
+# with the service running:
+MB="/c/Program Files/Autodesk/3ds Max 2027/3dsmaxbatch.exe"
+"$MB" "$(pwd)/scripts/live_max_publish.py"
+```
+
+`scripts/live_max_publish.py` mints identity -> stamps the `.max` custom
+fileProperties -> binds source to the live depot path -> verifies the stamp
+round-trips and `resolve()` reflects it -> `p4 submit` -> re-publishes to a real
+changelist. `3dsmaxbatch` doesn't surface python stdout, so the outcome is written
+to `%TEMP%/assetcore_max_result.txt` (read that for PASS/FAIL + the step log).
+Config via the same env as the Maya driver, with `ASSETCORE_DEPS` defaulting to
+`<repo-parent>/max-deps`.
