@@ -179,6 +179,11 @@ def find_similar(repo: AssetRepo, name: str, asset_type: str | None = None,
     Returns (asset, identity, score) descending by score. Never auto-merges or
     infers identity — the artist still chooses to reuse (relate the existing UUID)
     or declare new. Anti-pattern #5 stays respected.
+
+    Note: this does one get_identity per candidate (an N+1 on SQL backends). It is
+    an interactive, type-scoped, advisory nudge over a single asset_type, so the
+    candidate set is small; a batched list-with-identity port method is a future
+    optimization, not a correctness issue (see PR #7 review thread).
     """
     scored = []
     for asset in repo.list_assets(asset_type=asset_type):

@@ -116,15 +116,16 @@ def test_no_overwrite_when_different_stamp():
 
 
 # --- floating_dependencies (the footgun guard) ------------------------------
-def test_floating_dependencies_returns_only_floating_depends_on():
-    a, m, t, p = uuid4(), uuid4(), uuid4(), uuid4()
+def test_floating_dependencies_flags_float_and_unset_not_pin():
+    a, m, u, t, p = uuid4(), uuid4(), uuid4(), uuid4(), uuid4()
     edges = [
         Relationship(a, m, RelType.DEPENDS_ON, binding_mode=BindingMode.FLOAT),
+        Relationship(a, u, RelType.DEPENDS_ON),                          # unset == floating
         Relationship(a, t, RelType.DEPENDS_ON, binding_mode=BindingMode.PIN, pinned_version=1),
         Relationship(a, p, RelType.COMPOSED_OF),
     ]
-    floating = rules.floating_dependencies(edges)
-    assert [e.to_asset for e in floating] == [m]
+    floating = {e.to_asset for e in rules.floating_dependencies(edges)}
+    assert floating == {m, u}      # float + unset flagged; pin + non-DEPENDS_ON not
 
 
 # --- similarity_score (the dedupe nudge) ------------------------------------

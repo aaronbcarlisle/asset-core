@@ -69,11 +69,13 @@ def floating_dependencies(edges: list[Relationship]) -> list[Relationship]:
     """The float footgun guard: which DEPENDS_ON edges are still floating.
 
     A delivery step can require these be pinned before ship — pure function of the
-    consumer's outgoing edges (ARCHITECTURE Part 7 risk #3).
+    consumer's outgoing edges (ARCHITECTURE Part 7 risk #3). An unset binding_mode
+    counts as floating: resolve_dependency_version treats anything but PIN as
+    latest, so an un-pinned edge is exactly the footgun this guard must catch.
     """
     return [
         e for e in edges
-        if e.rel_type == RelType.DEPENDS_ON and e.binding_mode == BindingMode.FLOAT
+        if e.rel_type == RelType.DEPENDS_ON and e.binding_mode != BindingMode.PIN
     ]
 
 
