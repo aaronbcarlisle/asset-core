@@ -28,35 +28,38 @@ Reference docs: [`PIPELINE_MODEL.md`](PIPELINE_MODEL.md) (disciplines & relation
 
 ### Install
 
-The package is dependency-light by design; everything beyond the core is an
-*optional extra*, so a bare install runs the pure domain with nothing to set up.
+The package is dependency-light by design; beyond the CLI/SDK (which speak HTTP via
+`httpx`), everything is an *optional extra*. The pure core/app/sqlite path stays
+stdlib-only at import time, so the in-process, zero-setup story is unchanged.
 
 ```bash
-# zero-setup: pure core + verbs + sqlite, runs the demo and most tests
+# base: the assetcore CLI + SDK client (pulls only httpx)
 pip install -e .
 
-# the HTTP service + SDK client (FastAPI, uvicorn, httpx)
+# the HTTP service (FastAPI, uvicorn)
 pip install -e ".[service]"
 
-# everything a contributor needs (service + import-linter + alembic + sqlalchemy + docs)
+# everything a contributor needs (service + migrations + docs + test + import-linter)
 pip install -e ".[dev]"
 
 # optional targets
 pip install -e ".[postgres]"     # psycopg2 for the Postgres backend
 pip install -e ".[migrations]"   # alembic + sqlalchemy
 pip install -e ".[docs]"         # mkdocs-material + mkdocstrings (the docs site)
+pip install -e ".[test]"         # pytest (to run the suite)
 ```
 
 The extras map (see `pyproject.toml`):
 
 | Extra | Pulls in | Needed for |
 |---|---|---|
-| *(none)* | `pytest` | core, verbs, sqlite repo, the demo, unit tests |
-| `service` | fastapi, uvicorn, httpx | the L2 service, the SDK client, the CLI's live commands |
+| *(base)* | `httpx` | the `assetcore` CLI + SDK client (the primary interface) |
+| `service` | fastapi, uvicorn | the L2 service (the SDK client already has httpx from base) |
 | `postgres` | psycopg2-binary | the Postgres repo |
 | `migrations` | alembic, sqlalchemy | managed schema migrations |
 | `docs` | mkdocs-material, mkdocstrings[python] | building the documentation site (§12) |
-| `dev` | all of the above + import-linter | full contributor workflow |
+| `test` | pytest | running the test suite |
+| `dev` | service + migrations + docs + test + import-linter | full contributor workflow |
 
 ---
 
