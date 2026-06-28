@@ -39,6 +39,10 @@ jobs:
       - name: Build the site (strict)
         run: mkdocs build --strict
 
+      # Uploads a normal artifact via the Actions runtime token — needs no Pages
+      # permissions. Only the deploy job (actions/deploy-pages, which calls the Pages
+      # API) needs pages:write + id-token:write, so those stay scoped there
+      # (GitHub's least-privilege build/deploy split).
       - name: Upload the Pages artifact
         if: github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
