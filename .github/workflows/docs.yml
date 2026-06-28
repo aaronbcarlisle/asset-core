@@ -1,0 +1,66 @@
+name: Docs
+
+# Build the MkDocs site (API reference generated from docstrings by mkdocstrings).
+# Every PR and push runs `mkdocs build --strict` as a gate — a broken cross-link or a
+# `:::` pointing at a renamed module fails the build. Only pushes to `main` deploy to
+# GitHub Pages.
+#
+# One-time setup: repo Settings → Pages → Build and deployment → Source = "GitHub
+# Actions". Until then the build job still runs (and gates PRs); only deploy is idle.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (strict)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the docs toolchain
+        run: pip install -e ".[docs]"
+
+      - name: Build the site (strict)
+        run: mkdocs build --strict
+
+      # Uploads a normal artifact via the Actions runtime token — needs no Pages
+      # permissions. Only the deploy job (actions/deploy-pages, which calls the Pages
+      # API) needs pages:write + id-token:write, so those stay scoped there
+      # (GitHub's least-privilege build/deploy split).
+      - name: Upload the Pages artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write          # to publish to Pages
+      id-token: write        # to verify the deploy originates from this workflow
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

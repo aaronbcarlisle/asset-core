@@ -13,12 +13,14 @@ stance:
 > others' names. Renames never move files. Reuse, derivation, and dependency are
 > a **graph**, not folders.
 
-This is an early exploration/prototype. The full rationale is in
-[`docs/DESIGN.md`](docs/DESIGN.md) — **start there.**
+The full rationale is in [`docs/DESIGN.md`](docs/DESIGN.md) — **start there.**
 
 For the complete blueprint — empty directory to finished product, the layered
 design, the adapter SDK that makes new tools trivial, and the phased build plan —
-see **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**.
+see **[`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)**. To build on or extend the
+codebase, see **[`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md)**; for copy-paste usage
+of every capability, the **[`docs/COOKBOOK.md`](docs/COOKBOOK.md)**. The full doc
+map is [`docs/README.md`](docs/README.md).
 
 ## Quickstart (zero setup)
 
@@ -43,22 +45,31 @@ the SQLite backend translates it on the fly).
   get upstream material updates for free (no model→rig→anim republish chain),
   then *pins* it before delivery. One column (`binding_mode`) does it.
 
-## The core verbs (`assetcore/api.py`)
+## The universal verbs
 
-`declare` · `claim` · `rename` · `bind_source` · `bind_runtime` · `relate` ·
-`resolve` · `resolve_dependency` · `used_by` · `lineage`
+Identity & facets: `declare` · `claim` · `rename` · `bind_source` · `bind_runtime` ·
+`relocate` · `deprecate` · `resolve`. Graph: `relate` · `set_binding` ·
+`resolve_dependency` · `used_by` · `lineage` · `dependents`/`dependencies` (transitive)
+· `stale_derivations` · `floating_dependencies`. Human surfaces & scale:
+`find_similar` · `backfill_worklist` · `bulk_declare`/`relate`/`relocate`. Plus a
+live **event spine** (SSE). Every one is shown three ways in the
+[**Cookbook**](docs/COOKBOOK.md).
 
 The API is the only door — everything traffics in UUIDs, never paths.
 
 ## Layout
 
 ```
-assetcore/        the framework (api + db + integration stubs)
-docs/             DESIGN.md (read first) + ROADMAP.md
-tests/            the scenarios + invariants as pytest
+assetcore/        the layered framework — core / app / infra / service / sdk / integrations
+docs/             the documents (start: docs/README.md → DESIGN → ARCHITECTURE → DEVELOPMENT → COOKBOOK)
+tests/            unit / contract / integration suites + the protected prototype scenarios
+scripts/          operational drivers (live_* drive real tools; demo_* are narrated)
 demo.py           narrated end-to-end run
 CLAUDE.md         context for continuing with Claude Code
 ```
+
+See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md#3-repository-layout--the-layers) for
+the per-layer breakdown.
 
 ## Continuing with Claude Code
 

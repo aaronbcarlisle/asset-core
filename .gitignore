@@ -11,3 +11,7 @@ sg.env
 uv.lock
 .ruff_cache/
 .mypy_cache/
+site/
+*.egg-info/
+build/
+dist/

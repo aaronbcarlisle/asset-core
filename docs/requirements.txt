@@ -1,0 +1,6 @@
+# Documentation site toolchain (see DEVELOPMENT.md › Building the docs site).
+#   pip install -r docs/requirements.txt   (or: pip install -e ".[docs]")
+#   mkdocs serve     # live-reload preview at http://127.0.0.1:8000
+#   mkdocs build     # render the static site into ./site
+mkdocs-material>=9.5
+mkdocstrings[python]>=0.26
