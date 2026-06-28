@@ -73,7 +73,7 @@ def rename(repo: AssetRepo, sink: EventSink, asset_id: UUID, new_name: str,
     The headline guarantee that identity is not the path: a rename touches one
     facet. Pass ``new_taxonomy`` to also re-file it taxonomically (still no bytes
     move). Raises ``ValueError`` if unknown. Emits an ``identity.renamed`` event.
-    To move the bytes instead, see :func:`relocate`.
+    To move the bytes instead, see `relocate`.
     """
     identity = repo.get_identity(asset_id)
     if identity is None:
@@ -141,10 +141,10 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
 
     ``binding_mode``/``pinned_version`` are valid only on DEPENDS_ON. For
     DERIVED_FROM the edge records the parent's current source version, so
-    :func:`stale_derivations` can flag it once the parent advances. The edge is
+    `stale_derivations` can flag it once the parent advances. The edge is
     validated (self-edges and a binding_mode on a non-DEPENDS_ON edge raise
     ``ValueError``). Emits a ``relationship.added`` event. Flipping an existing
-    edge float↔pin is :func:`set_binding`, not this.
+    edge float↔pin is `set_binding`, not this.
     """
     rel_type = RelType(rel_type)
     if binding_mode is not None:
@@ -174,7 +174,7 @@ def set_binding(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID,
     """Flip an EXISTING DEPENDS_ON edge between float and pin (the consumer's call).
 
     ``float`` always resolves to the latest authored version; ``pin`` locks to a
-    specific one. Raises ``ValueError`` if there's no such edge (use :func:`relate`
+    specific one. Raises ``ValueError`` if there's no such edge (use `relate`
     to create one). Emits a ``binding.changed`` event.
     """
     binding_mode = BindingMode(binding_mode)
@@ -219,7 +219,7 @@ def resolve_dependency(repo: AssetRepo, frm: UUID, to: UUID) -> SourceVersion | 
 
     The pin if the edge is pinned, else the current latest. Returns ``None`` if
     there's no such edge or no matching version. The float/pin decision itself is
-    the pure :func:`assetcore.core.rules.resolve_dependency_version`.
+    the pure `assetcore.core.rules.resolve_dependency_version`.
     """
     edge = repo.get_edge(frm, to, RelType.DEPENDS_ON)
     if edge is None:
