@@ -12,6 +12,7 @@ workflow needs several verbs to commit-or-rollback together, that becomes a new
 port method, not a leak in this layer.
 """
 from datetime import datetime, timezone
+from typing import NamedTuple
 from uuid import UUID
 
 from assetcore.app import observability, verbs
@@ -20,16 +21,24 @@ from assetcore.core.ports import AssetRepo, EventSink
 from assetcore.core.types import BindingMode, RelType
 
 
+class DeclareResult(NamedTuple):
+    """Result of declare with idempotency status."""
+
+    id: UUID
+    created: bool
+
+
 class AssetcoreService:
     def __init__(self, repo: AssetRepo, sink: EventSink) -> None:
         self.repo = repo
         self.sink = sink
 
     def declare(self, asset_type: str, created_by: str, origin: dict | None = None,
-                asset_id: UUID | None = None) -> UUID:
+                asset_id: UUID | None = None) -> DeclareResult:
         if asset_id is not None and self.repo.get_asset(asset_id) is not None:
-            return asset_id
-        return verbs.declare(self.repo, self.sink, asset_type, created_by, origin, asset_id=asset_id)
+            return DeclareResult(id=asset_id, created=False)
+        declared_id = verbs.declare(self.repo, self.sink, asset_type, created_by, origin, asset_id=asset_id)
+        return DeclareResult(id=declared_id, created=True)
 
     def claim(self, asset_id: UUID, display_name: str, taxonomy: str, actor: str, **attrs) -> None:
         verbs.claim(self.repo, self.sink, asset_id, display_name, taxonomy, actor, **attrs)

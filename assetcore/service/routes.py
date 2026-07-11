@@ -85,11 +85,10 @@ async def metrics(request: Request, service: AssetcoreService = Depends(get_serv
 @router.post("/assets", response_model=DeclareResponse, status_code=201)
 async def declare(body: DeclareRequest, response: Response, service: AssetcoreService = Depends(get_service),
                   _: str = Depends(auth.require(auth.ARTIST, auth.ENGINE))) -> DeclareResponse:
-    existed = body.id is not None and service.repo.get_asset(body.id) is not None
-    aid = service.declare(body.asset_type, body.created_by, body.origin, asset_id=body.id)
-    if existed:
+    result = service.declare(body.asset_type, body.created_by, body.origin, asset_id=body.id)
+    if not result.created:
         response.status_code = 200
-    return DeclareResponse(id=aid)
+    return DeclareResponse(id=result.id)
 
 
 @router.get("/assets", response_model=list[AssetSummaryOut])

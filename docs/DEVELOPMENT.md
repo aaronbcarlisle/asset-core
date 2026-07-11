@@ -246,6 +246,14 @@ erroring.
 **Cross-backend Postgres run** (optional): stand up a throwaway PG, then
 `ASSETCORE_TEST_DSN=postgresql://... python -m pytest tests/integration/`.
 
+### Hub / offline replay
+
+For §7.5.4 replay safety, duplicate relationship replays are rejected at L1 by
+`verbs.relate`: it raises `ValueError("duplicate edge: ...")` when the same typed
+edge already exists. This behavior is independent of `_already_applied` checks,
+which are used for dependency replay helpers and are not the dedupe guard for
+`relate`.
+
 ---
 
 ## 7. Extending: add a new DCC ("the weekend adapter")

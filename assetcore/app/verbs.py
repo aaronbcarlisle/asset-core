@@ -148,6 +148,11 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
     validated (self-edges and a binding_mode on a non-DEPENDS_ON edge raise
     ``ValueError``). Emits a ``relationship.added`` event. Flipping an existing
     edge float↔pin is `set_binding`, not this.
+
+    Hub/offline replay safety is enforced here by duplicate-edge detection:
+    re-applying the same edge raises ``ValueError`` with ``duplicate edge: ...``.
+    This path is intentional and does not rely on `_already_applied` checks used
+    by dependency replay helpers.
     """
     rel_type = RelType(rel_type)
     if binding_mode is not None:
