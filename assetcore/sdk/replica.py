@@ -5,7 +5,7 @@ import os
 import sqlite3
 import time
 from collections import deque
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from assetcore.sdk.hub import HubContext, PipelineConfig
 
@@ -89,7 +89,7 @@ def hydrate_cache(pipeline: PipelineConfig, ctx: HubContext, client, now_iso: st
     seeds = {a["id"]: a for a in client.list_assets(created_by=ctx["user_name"], taxonomy_prefix=prefix)}
     for a in client.list_assets(taxonomy_prefix=prefix, updated_since=since):
         seeds.setdefault(a["id"], a)
-    # transitive dependency closure via BFS (spec §5.2 step 2) — edges from dependents()
+    # transitive dependency closure via BFS (spec §5.2 step 2) — edges from dependencies()
     tmp = pipeline.local_cache + ".tmp"
     if os.path.exists(tmp):
         os.remove(tmp)
@@ -107,16 +107,17 @@ def hydrate_cache(pipeline: PipelineConfig, ctx: HubContext, client, now_iso: st
         if resolved is None:
             continue
         # flatten resolve response + seed fields for replica storage
-        row = seeds.get(aid, {})
+        row = {**seeds.get(aid, {})}
         row.update({"id": aid, "name": (resolved.get("identity") or {}).get("display_name") or aid,
                     "asset_type": (resolved.get("meta") or {}).get("asset_type")})
         upsert_asset(conn, row)
         assets += 1
-        for dep in client.dependents(aid):
-            upsert_relation(conn, aid, dep["to_id"], dep["rel_type"], dep.get("binding_mode", "float"))
+        for dep in client.dependencies(aid):
+            to_id = dep["asset_id"]
+            upsert_relation(conn, aid, to_id, dep["rel_type"])
             relations += 1
-            if dep["to_id"] not in seen:
-                queue.append(dep["to_id"])
+            if to_id not in seen:
+                queue.append(to_id)
     conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('hydrated_at', ?)", (now_iso,))
     conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES ('project', ?)", (project,))
     conn.commit()

@@ -1,11 +1,10 @@
-from datetime import datetime, timezone
 from assetcore.sdk.hub import PipelineConfig
 from assetcore.sdk.replica import open_replica, hydrate_cache, get_asset
 
 NOW = "2026-07-11T12:00:00+00:00"
 
 class FakeClient:
-    """list_assets returns authored assets; resolve + dependents drive closure."""
+    """list_assets returns authored assets; resolve + dependencies drive closure."""
     def __init__(self):
         self.assets = {
             "a1": {"id": "a1", "name": "hero", "asset_type": "model", "status": "wip",
@@ -13,7 +12,7 @@ class FakeClient:
             "a2": {"id": "a2", "name": "hero_rig", "asset_type": "rig", "status": "wip",
                    "created_by": "other", "updated_at": NOW},
         }
-        self.deps = {"a1": [{"to_id": "a2", "rel_type": "DEPENDS_ON", "binding_mode": "float"}], "a2": []}
+        self.deps = {"a1": [{"asset_id": "a2", "depth": 1, "rel_type": "DEPENDS_ON"}], "a2": []}
     def list_assets(self, created_by=None, taxonomy_prefix=None, updated_since=None):
         if created_by:
             return [a for a in self.assets.values() if a.get("created_by") == created_by]
@@ -24,7 +23,7 @@ class FakeClient:
         a = self.assets[asset_id]
         return {"id": asset_id, "meta": {"asset_type": a["asset_type"]},
                 "identity": {"display_name": a["name"]}, "source": None, "runtime": None}
-    def dependents(self, asset_id, rel_types=None, depth=None):
+    def dependencies(self, asset_id, rel_types=None, depth=None):
         return self.deps.get(asset_id, [])
 
 def _pipeline(tmp_path):
