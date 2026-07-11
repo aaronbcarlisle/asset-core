@@ -11,7 +11,7 @@ port to expose transaction control, which it deliberately does not yet — when 
 workflow needs several verbs to commit-or-rollback together, that becomes a new
 port method, not a leak in this layer.
 """
-from datetime import datetime
+from datetime import datetime, timezone
 from uuid import UUID
 
 from assetcore.app import observability, verbs
@@ -25,8 +25,11 @@ class AssetcoreService:
         self.repo = repo
         self.sink = sink
 
-    def declare(self, asset_type: str, created_by: str, origin: dict | None = None) -> UUID:
-        return verbs.declare(self.repo, self.sink, asset_type, created_by, origin)
+    def declare(self, asset_type: str, created_by: str, origin: dict | None = None,
+                asset_id: UUID | None = None) -> UUID:
+        if asset_id is not None and self.repo.get_asset(asset_id) is not None:
+            return asset_id
+        return verbs.declare(self.repo, self.sink, asset_type, created_by, origin, asset_id=asset_id)
 
     def claim(self, asset_id: UUID, display_name: str, taxonomy: str, actor: str, **attrs) -> None:
         verbs.claim(self.repo, self.sink, asset_id, display_name, taxonomy, actor, **attrs)
@@ -52,6 +55,45 @@ class AssetcoreService:
 
     def resolve(self, asset_id: UUID) -> dict:
         return verbs.resolve(self.repo, asset_id)
+
+    def list_assets(self, created_by: str | None = None, taxonomy_prefix: str | None = None,
+                    updated_since: datetime | None = None) -> list[dict]:
+        threshold = updated_since
+        if threshold is not None and threshold.tzinfo is None:
+            threshold = threshold.replace(tzinfo=timezone.utc)
+
+        items = []
+        for asset in self.repo.list_assets():
+            if created_by is not None and asset.created_by != created_by:
+                continue
+
+            identity = self.repo.get_identity(asset.id)
+            if taxonomy_prefix is not None:
+                taxonomy = identity.taxonomy if identity is not None else None
+                if taxonomy is None or not taxonomy.startswith(taxonomy_prefix):
+                    continue
+
+            source = next((v for v in self.repo.source_versions(asset.id) if v.is_latest), None)
+            runtime = next((v for v in self.repo.runtime_versions(asset.id) if v.is_latest), None)
+            if threshold is not None:
+                latest_touch = max(
+                    [asset.created_at]
+                    + ([source.published_at] if source is not None else [])
+                    + ([runtime.cooked_at] if runtime is not None else [])
+                )
+                if latest_touch < threshold:
+                    continue
+
+            items.append({
+                "id": asset.id,
+                "asset_type": asset.asset_type,
+                "created_by": asset.created_by,
+                "created_at": asset.created_at,
+                "meta": asset,
+                "identity": identity,
+                "source": source,
+            })
+        return items
 
     def resolve_dependency(self, frm: UUID, to: UUID) -> SourceVersion | None:
         return verbs.resolve_dependency(self.repo, frm, to)

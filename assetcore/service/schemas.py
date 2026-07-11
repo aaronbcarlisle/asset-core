@@ -13,6 +13,7 @@ from assetcore.core.types import BindingMode, Lifecycle, RelType
 
 # --- requests ---------------------------------------------------------------
 class DeclareRequest(BaseModel):
+    id: UUID | None = None
     asset_type: str
     created_by: str
     origin: dict = Field(default_factory=dict)
@@ -139,6 +140,16 @@ class ResolveResponse(BaseModel):
     identity: IdentityOut | None
     source: SourceOut | None
     runtime: RuntimeOut | None
+
+
+class AssetSummaryOut(BaseModel):
+    id: UUID
+    asset_type: str
+    created_by: str
+    created_at: str
+    meta: AssetMetaOut | None
+    identity: IdentityOut | None
+    source: SourceOut | None
 
 
 class RelationshipOut(BaseModel):

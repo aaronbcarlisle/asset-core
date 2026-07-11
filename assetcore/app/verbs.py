@@ -26,14 +26,17 @@ from assetcore.core.types import BindingMode, Lifecycle, RelType
 # DECLARE — summon an asset into existence; returns a durable provisional UUID.
 # ---------------------------------------------------------------------------
 def declare(repo: AssetRepo, sink: EventSink, asset_type: str, created_by: str,
-            origin: dict | None = None) -> UUID:
+            origin: dict | None = None, asset_id: UUID | None = None) -> UUID:
     """Summon an asset into existence; return its durable provisional UUID.
 
     The asset is born PROVISIONAL with an empty identity facet already attached
     (ready for backfill). `origin` records free-form birth context (shot, dcc, …)
     that `find_similar` and the worklist use later. Emits a ``declared`` event.
     """
-    asset = Asset(asset_type=asset_type, created_by=created_by, origin=origin or {})
+    if asset_id is None:
+        asset = Asset(asset_type=asset_type, created_by=created_by, origin=origin or {})
+    else:
+        asset = Asset(asset_type=asset_type, created_by=created_by, origin=origin or {}, id=asset_id)
     identity = IdentityFacet(asset_id=asset.id)   # facet exists from birth, for backfill
     repo.create_asset(asset, identity)
     sink.emit(Event(asset.id, "declared", {"asset_type": asset_type}, created_by))
@@ -149,6 +152,8 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
     rel_type = RelType(rel_type)
     if binding_mode is not None:
         binding_mode = BindingMode(binding_mode)
+    if repo.get_edge(frm, to, rel_type) is not None:
+        raise ValueError(f"duplicate edge: {frm}-{rel_type.value}->{to}")
     attributes: dict = {}
     if rel_type == RelType.DERIVED_FROM:
         # anchor staleness: record the source version this child was derived at, so

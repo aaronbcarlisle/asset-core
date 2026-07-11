@@ -50,10 +50,13 @@ class AssetcoreClient:
         return r
 
     # --- verbs ---
-    def declare(self, asset_type: str, created_by: str, origin: dict | None = None) -> str:
+    def declare(self, asset_type: str, created_by: str, origin: dict | None = None,
+                asset_id: str | None = None) -> str:
         body: dict[str, Any] = {"asset_type": asset_type, "created_by": created_by}
         if origin is not None:
             body["origin"] = origin
+        if asset_id is not None:
+            body["id"] = asset_id
         return self._post("/assets", body).json()["id"]
 
     def claim(self, asset_id: str, display_name: str, taxonomy: str, actor: str,
@@ -96,6 +99,20 @@ class AssetcoreClient:
 
     def resolve(self, asset_id: str) -> dict:
         return self._get(f"/assets/{asset_id}").json()
+
+    def list_assets(self, created_by: str | None = None, taxonomy_prefix: str | None = None,
+                    updated_since: str | None = None) -> list[dict]:
+        params: dict[str, Any] = {}
+        if created_by is not None:
+            params["created_by"] = created_by
+        if taxonomy_prefix is not None:
+            params["taxonomy_prefix"] = taxonomy_prefix
+        if updated_since is not None:
+            params["updated_since"] = updated_since
+        return self._get("/assets", params if params else None).json()
+
+    def get_source(self, asset_id: str) -> dict | None:
+        return self.resolve(asset_id).get("source")
 
     def resolve_dependency(self, from_asset: str, to_asset: str) -> dict | None:
         return self._get("/dependency", {"frm": from_asset, "to": to_asset}).json()

@@ -21,6 +21,7 @@ from assetcore.service import auth
 from assetcore.service.events import event_source
 from assetcore.service.schemas import (
     AssetMetaOut,
+    AssetSummaryOut,
     BindRuntimeRequest,
     BindSourceRequest,
     BulkCountResponse,
@@ -82,10 +83,39 @@ async def metrics(request: Request, service: AssetcoreService = Depends(get_serv
 
 # --- identity lifecycle -----------------------------------------------------
 @router.post("/assets", response_model=DeclareResponse, status_code=201)
-async def declare(body: DeclareRequest, service: AssetcoreService = Depends(get_service),
+async def declare(body: DeclareRequest, response: Response, service: AssetcoreService = Depends(get_service),
                   _: str = Depends(auth.require(auth.ARTIST, auth.ENGINE))) -> DeclareResponse:
-    aid = service.declare(body.asset_type, body.created_by, body.origin)
+    existed = body.id is not None and service.repo.get_asset(body.id) is not None
+    aid = service.declare(body.asset_type, body.created_by, body.origin, asset_id=body.id)
+    if existed:
+        response.status_code = 200
     return DeclareResponse(id=aid)
+
+
+@router.get("/assets", response_model=list[AssetSummaryOut])
+async def list_assets(
+    created_by: str | None = None,
+    taxonomy_prefix: str | None = None,
+    updated_since: datetime | None = None,
+    service: AssetcoreService = Depends(get_service),
+) -> list[AssetSummaryOut]:
+    assets = service.list_assets(
+        created_by=created_by,
+        taxonomy_prefix=taxonomy_prefix,
+        updated_since=updated_since,
+    )
+    return [
+        AssetSummaryOut(
+            id=a["id"],
+            asset_type=a["asset_type"],
+            created_by=a["created_by"],
+            created_at=a["created_at"].isoformat(),
+            meta=AssetMetaOut.model_validate(a["meta"]) if a["meta"] else None,
+            identity=IdentityOut.model_validate(a["identity"]) if a["identity"] else None,
+            source=SourceOut.model_validate(a["source"]) if a["source"] else None,
+        )
+        for a in assets
+    ]
 
 
 @router.get("/assets/{asset_id}", response_model=ResolveResponse)
