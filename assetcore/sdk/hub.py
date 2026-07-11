@@ -5,9 +5,14 @@ import os
 import re
 import subprocess
 import sys
+import time
 import tomllib
 from dataclasses import dataclass, field
 from typing import Mapping, TypedDict
+
+import httpx
+
+_HEALTH_TIMEOUT = 2.0
 
 _VAR_RE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
 
@@ -121,3 +126,54 @@ def launch_dcc(target: LaunchTarget, pipeline: PipelineConfig, ctx: HubContext,
     flags = subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
     proc = subprocess.Popen([exe], env=env, cwd=ctx["workspace_root"], creationflags=flags)
     return {"ok": True, "pid": proc.pid, "error": None}
+
+def _local_reader_identity(pipeline: PipelineConfig) -> dict | None:
+    """Return /health payload if something answers on the local port, else None."""
+    try:
+        r = httpx.get(f"http://127.0.0.1:{pipeline.local_reader_port}/health",
+                      timeout=_HEALTH_TIMEOUT)
+        r.raise_for_status()
+        return r.json()
+    except Exception:
+        return None
+
+def _is_our_reader(pipeline: PipelineConfig, body: dict | None) -> bool:
+    if not body or body.get("app") != "assetcore-local-reader":
+        return False
+    project = pipeline.scope.get("assetcore_project", "")
+    return not project or body.get("project") == project
+
+def health_check(pipeline: PipelineConfig) -> dict:
+    central = "down"
+    try:
+        httpx.get(pipeline.central_url.rstrip("/") + "/health",
+                  timeout=_HEALTH_TIMEOUT).raise_for_status()
+        central = "up"
+    except Exception:
+        pass
+    local = "up" if _is_our_reader(pipeline, _local_reader_identity(pipeline)) else "down"
+    from assetcore.sdk.offline import open_outbox, pending_count, failed_count
+    conn = open_outbox(pipeline.outbox_path)
+    pending, failed = pending_count(conn), failed_count(conn)
+    conn.close()
+    return {"central": central, "local_reader": local,
+            "outbox_pending": pending, "outbox_failed": failed}
+
+def ensure_local_reader(pipeline: PipelineConfig) -> dict:
+    body = _local_reader_identity(pipeline)
+    if body is not None:
+        if _is_our_reader(pipeline, body):
+            return {"ok": True, "started": False, "error": None}
+        return {"ok": False, "started": False,
+                "error": f"port {pipeline.local_reader_port} is occupied by "
+                         f"{body.get('app', 'unknown')} (project {body.get('project')}); "
+                         f"set local_reader_port in pipeline.toml"}
+    flags = subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
+    subprocess.Popen(
+        ["assetcore", "hub", "serve-local", "--config", pipeline.config_path],
+        creationflags=flags)
+    for _ in range(20):                      # up to ~10s for cold start
+        time.sleep(0.5)
+        if _is_our_reader(pipeline, _local_reader_identity(pipeline)):
+            return {"ok": True, "started": True, "error": None}
+    return {"ok": False, "started": True, "error": "local reader did not become healthy"}

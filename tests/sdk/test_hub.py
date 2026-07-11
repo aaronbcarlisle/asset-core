@@ -99,3 +99,39 @@ def test_launch_dcc_unavailable_returns_error(tmp_path):
     t = LaunchTarget(id="maya", label="Maya", executable="${MAYA_BIN}", env_template="dcc_standard")
     result = launch_dcc(t, _pipeline(tmp_path), _ctx(tmp_path), os_env={})
     assert result["ok"] is False and "MAYA_BIN" in result["error"]
+
+from assetcore.sdk.hub import health_check, ensure_local_reader
+
+class FakeResponse:
+    def __init__(self, json_body, status=200):
+        self._json, self.status_code = json_body, status
+    def json(self): return self._json
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+def test_health_check_identity_mismatch_is_down(monkeypatch, tmp_path):
+    pipeline = _pipeline(tmp_path)
+    def fake_get(url, **kw):
+        if str(pipeline.local_reader_port) in url:
+            return FakeResponse({"app": "some-other-service"})   # squatter on 8741
+        raise ConnectionError("central down")
+    monkeypatch.setattr("assetcore.sdk.hub.httpx.get", fake_get)
+    h = health_check(pipeline)
+    assert h["local_reader"] == "down"        # wrong identity != up
+    assert h["central"] == "down"
+
+def test_ensure_local_reader_identity_mismatch_errors(monkeypatch, tmp_path):
+    pipeline = _pipeline(tmp_path)
+    monkeypatch.setattr("assetcore.sdk.hub.httpx.get",
+                        lambda url, **kw: FakeResponse({"app": "some-other-service"}))
+    result = ensure_local_reader(pipeline)
+    assert result["ok"] is False and "port" in result["error"]
+
+def test_ensure_local_reader_already_running(monkeypatch, tmp_path):
+    pipeline = _pipeline(tmp_path)
+    monkeypatch.setattr("assetcore.sdk.hub.httpx.get",
+                        lambda url, **kw: FakeResponse({"app": "assetcore-local-reader",
+                                                        "project": "MyGame"}))
+    result = ensure_local_reader(pipeline)
+    assert result == {"ok": True, "started": False, "error": None}
