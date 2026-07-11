@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import subprocess
+import sys
 import tomllib
 from dataclasses import dataclass, field
 from typing import Mapping, TypedDict
@@ -80,3 +82,42 @@ def load_pipeline_config(path: str, env: Mapping[str, str] | None = None) -> Pip
         env_templates=hub.get("env_templates", {}),
         launch_targets=[LaunchTarget(**t) for t in hub.get("launch_targets", [])],
     )
+
+def resolve_target(target: LaunchTarget, env: Mapping[str, str],
+                   builtins: Mapping[str, str]) -> tuple[str | None, str | None]:
+    if target.platform and target.platform != sys.platform:
+        return None, f"platform {target.platform} != {sys.platform}"
+    try:
+        exe = expand_vars(target.executable, env, builtins)
+    except KeyError as e:
+        return None, f"env var {e.args[0]} not set"
+    if not os.path.isfile(exe):
+        return None, f"executable not found: {exe}"
+    return exe, None
+
+def merge_env(pipeline: PipelineConfig, target: LaunchTarget, ctx: HubContext,
+              os_env: Mapping[str, str]) -> dict[str, str]:
+    builtins = make_builtins(pipeline.config_path)
+    merged = dict(os_env)
+    template = pipeline.env_templates.get(target.env_template, {})
+    for key, raw in template.items():
+        merged[key] = expand_vars(raw, os_env, builtins)
+    merged["ASSETCORE_PROJECT"] = pipeline.scope.get("assetcore_project", "")
+    merged["ASSETCORE_USER"] = ctx["user_name"]
+    merged["ASSETCORE_WORKSPACE_ROOT"] = ctx["workspace_root"]
+    return merged
+
+def launch_dcc(target: LaunchTarget, pipeline: PipelineConfig, ctx: HubContext,
+               os_env: Mapping[str, str] | None = None) -> dict:
+    os_env = dict(os.environ) if os_env is None else dict(os_env)
+    builtins = make_builtins(pipeline.config_path)
+    exe, reason = resolve_target(target, os_env, builtins)
+    if exe is None:
+        return {"ok": False, "pid": None, "error": reason}
+    try:
+        env = merge_env(pipeline, target, ctx, os_env)
+    except KeyError as e:
+        return {"ok": False, "pid": None, "error": f"env var {e.args[0]} not set in template"}
+    flags = subprocess.DETACHED_PROCESS if sys.platform == "win32" else 0
+    proc = subprocess.Popen([exe], env=env, cwd=ctx["workspace_root"], creationflags=flags)
+    return {"ok": True, "pid": proc.pid, "error": None}
