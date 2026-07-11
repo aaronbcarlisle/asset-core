@@ -104,3 +104,76 @@ def test_retry_failed_resets_to_pending(tmp_path):
     mark_failed(db, eid, "boom")
     assert retry_failed(db) == 1
     assert pending_count(db) == 1 and failed_count(db) == 0
+
+
+import uuid
+from assetcore.sdk.hub import PipelineConfig
+from assetcore.sdk.offline import HybridClient, open_outbox, pending_count
+from assetcore.sdk.replica import open_replica, get_asset
+
+
+def _pipeline(tmp_path):
+    return PipelineConfig(
+        central_url="http://central:8080", local_cache=str(tmp_path / "assetcore.db"),
+        outbox_path=str(tmp_path / "outbox.db"), config_path=str(tmp_path / "pipeline.toml"),
+        scope={"assetcore_project": "MyGame"},
+    )
+
+
+class DownCentral:
+    def __getattr__(self, name):
+        def boom(*a, **kw):
+            raise ConnectionError("central down")
+        return boom
+
+
+class UpCentral:
+    def __init__(self):
+        self.calls = []
+    def ping(self): return True
+    def declare(self, asset_type, actor, asset_id=None):
+        self.calls.append(("declare", asset_type, asset_id))
+        return {"id": asset_id, "asset_type": asset_type}
+    def bind_source(self, asset_id, location_uri, tool, revision, actor):
+        self.calls.append(("bind_source", asset_id))
+        return {"id": asset_id}
+
+
+def test_offline_declare_queues_and_patches_replica(tmp_path):
+    hc = HybridClient(_pipeline(tmp_path), central=DownCentral())
+    result = hc.declare("model", actor="jsmith")
+    asset_id = result["id"]
+    uuid.UUID(asset_id)                              # client-minted UUID (spec §5.3)
+    ob = open_outbox(str(tmp_path / "outbox.db"))
+    assert pending_count(ob) == 1                    # queued for replay
+    rep = open_replica(str(tmp_path / "assetcore.db"))
+    assert get_asset(rep, asset_id)["asset_type"] == "model"   # optimistic local patch
+
+
+def test_online_declare_goes_to_central_with_client_id(tmp_path):
+    central = UpCentral()
+    hc = HybridClient(_pipeline(tmp_path), central=central)
+    result = hc.declare("model", actor="jsmith")
+    assert central.calls[0][0] == "declare"
+    assert central.calls[0][2] == result["id"]       # client id passed through
+    ob = open_outbox(str(tmp_path / "outbox.db"))
+    assert pending_count(ob) == 0                    # nothing queued
+
+
+def test_read_falls_back_to_central_when_local_down(tmp_path, monkeypatch):
+    class CentralWithRead(UpCentral):
+        def resolve(self, asset_id):
+            return {"asset": {"id": asset_id, "name": "x", "asset_type": "model"}, "dependencies": []}
+    hc = HybridClient(_pipeline(tmp_path), central=CentralWithRead(),
+                      os_env={"ASSETCORE_LOCAL_URL": "http://127.0.0.1:1"})  # nothing listens
+    out = hc.resolve("a1")
+    assert out["asset"]["id"] == "a1"
+
+
+def test_health_reports_outbox_counts(tmp_path):
+    hc = HybridClient(_pipeline(tmp_path), central=DownCentral(),
+                      os_env={"ASSETCORE_LOCAL_URL": "http://127.0.0.1:1"})
+    hc.declare("model", actor="jsmith")
+    h = hc.health()
+    assert h["central"] == "down" and h["local_reader"] == "down"
+    assert h["outbox_pending"] == 1 and h["outbox_failed"] == 0
