@@ -1,0 +1,56 @@
+[hub]
+central_url = "${ASSETCORE_CENTRAL_URL}"
+local_cache = "${LOCALAPPDATA}/StudioUGS/cache/assetcore.db"
+outbox_path = "${LOCALAPPDATA}/StudioUGS/cache/outbox.db"
+local_reader_port = 8741
+hydrate_on_sync = true
+recent_days = 14
+
+[hub.scope]
+p4_depot_prefix = "//MyGame/Main/"
+assetcore_project = "MyGame"
+
+[hub.env_templates.dcc_standard]
+ASSETCORE_MODE = "hybrid"
+ASSETCORE_LOCAL_URL = "http://127.0.0.1:8741"
+ASSETCORE_CENTRAL_URL = "${ASSETCORE_CENTRAL_URL}"
+PYTHONPATH = "${PIPELINE_ROOT}/python${PATHSEP}${PIPELINE_ROOT}/site-packages"
+
+[[hub.launch_targets]]
+id = "maya"
+label = "Maya 2024"
+icon = "icons/maya.png"
+executable = "${MAYA_BIN}"
+env_template = "dcc_standard"
+platform = "win32"
+
+[[hub.launch_targets]]
+id = "max"
+label = "3ds Max 2025"
+icon = "icons/max.png"
+executable = "${MAX_BIN}"
+env_template = "dcc_standard"
+platform = "win32"
+
+[[hub.launch_targets]]
+id = "blender"
+label = "Blender 4.x"
+icon = "icons/blender.png"
+executable = "${BLENDER_BIN}"
+env_template = "dcc_standard"
+
+[[hub.launch_targets]]
+id = "photoshop"
+label = "Photoshop"
+icon = "icons/photoshop.png"
+executable = "${PHOTOSHOP_BIN}"
+env_template = "dcc_standard"
+platform = "win32"
+
+[[hub.launch_targets]]
+id = "substance"
+label = "Substance 3D Painter"
+icon = "icons/substance.png"
+executable = "${SUBSTANCE_PAINTER_BIN}"
+env_template = "dcc_standard"
+platform = "win32"
