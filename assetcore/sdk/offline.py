@@ -13,6 +13,7 @@ from assetcore.sdk.hub import PipelineConfig
 from assetcore.sdk import replica as _replica
 
 _PROBE_TIMEOUT = 2.0
+_LIST_PAGE = 500       # central /assets default page size; used to page the fallback
 
 
 class OutboxEntry(TypedDict):
@@ -270,8 +271,18 @@ class HybridClient:
         try:
             return self._local_get("/assets", params=params or None)
         except Exception:
-            return self._central.list_assets(created_by=created_by, taxonomy_prefix=taxonomy_prefix,
-                                             updated_since=updated_since)
+            # the local reader returns every match; the central /assets defaults to
+            # limit=500, so page the fallback to completion for parity (no truncation).
+            out: list[dict] = []
+            offset = 0
+            while True:
+                page = self._central.list_assets(
+                    created_by=created_by, taxonomy_prefix=taxonomy_prefix,
+                    updated_since=updated_since, limit=_LIST_PAGE, offset=offset)
+                out.extend(page)
+                if len(page) < _LIST_PAGE:
+                    return out
+                offset += _LIST_PAGE
 
     # ---- writes: central if up, else outbox + optimistic replica patch ----
 

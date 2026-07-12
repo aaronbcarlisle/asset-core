@@ -117,6 +117,28 @@ def test_response_carries_request_id(client):
     assert r2.headers["X-Request-ID"] == "trace-abc"
 
 
+def test_bind_source_version_conflict_returns_503():
+    from fastapi.testclient import TestClient
+    from assetcore.core.errors import VersionConflict
+    from assetcore.infra.broadcast_sink import BroadcastSink
+    from assetcore.infra.sqlite_repo import SqliteRepo
+    from assetcore.service.app import create_app
+
+    class ConflictRepo(SqliteRepo):
+        def add_source_version(self, v):        # always lose the race
+            raise VersionConflict("persistent contention")
+
+    app = create_app(repo=ConflictRepo(":memory:", check_same_thread=False), sink=BroadcastSink())
+    tc = TestClient(app)
+    aid = tc.post("/assets", json={"asset_type": "prop", "created_by": "amy"},
+                  headers={"X-Assetcore-Token": "artist-token"}).json()["id"]
+    r = tc.post(f"/assets/{aid}/source",
+                json={"location_uri": "//d/a.ma", "tool": "maya", "revision": "1",
+                      "published_by": "amy"}, headers={"X-Assetcore-Token": "artist-token"})
+    assert r.status_code == 503                  # retryable, not a generic 500
+    assert r.headers.get("Retry-After") == "1"
+
+
 def test_request_id_present_on_handled_and_unhandled_errors():
     from fastapi.testclient import TestClient
     from assetcore.infra.broadcast_sink import BroadcastSink

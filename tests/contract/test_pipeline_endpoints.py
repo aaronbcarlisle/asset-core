@@ -97,6 +97,19 @@ def test_deprecate_over_http(make_client):
     assert prod.resolve(a)["meta"]["lifecycle"] == "deprecated"
 
 
+def test_claim_attribute_named_reactivate_does_not_collide(make_client):
+    # regression: attributes were splatted as kwargs, so an attribute key colliding
+    # with the `reactivate` parameter raised TypeError -> 500. Now attributes is a
+    # plain dict, so any key is safe.
+    artist, prod = make_client("artist-token"), make_client("prod-token")
+    a = artist.declare("prop", "amy")
+    prod.claim(a, "Barrel", "props/barrel", "pat",
+               attributes={"reactivate": "not-a-flag", "actor": "also-fine"})
+    ident = artist.resolve(a)["identity"]
+    assert ident["attributes"] == {"reactivate": "not-a-flag", "actor": "also-fine"}
+    assert ident["display_name"] == "Barrel"
+
+
 def test_claim_deprecated_is_409_without_reactivate(make_client):
     import httpx
     artist, prod = make_client("artist-token"), make_client("prod-token")

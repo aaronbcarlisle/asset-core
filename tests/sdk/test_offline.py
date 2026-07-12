@@ -275,6 +275,20 @@ def test_read_falls_back_to_central_when_local_down(tmp_path, monkeypatch):
     assert out["id"] == "a1"
 
 
+def test_list_assets_central_fallback_pages_all(tmp_path):
+    # local reader down -> central fallback must page past limit=500, not truncate
+    class PagingCentral:
+        def __init__(self):
+            self.rows = [{"id": f"a{i}"} for i in range(1100)]
+        def list_assets(self, created_by=None, taxonomy_prefix=None, updated_since=None,
+                        limit=None, offset=0):
+            return self.rows[offset:offset + limit] if limit is not None else self.rows[offset:]
+    hc = HybridClient(_pipeline(tmp_path), central=PagingCentral(),
+                      os_env={"ASSETCORE_LOCAL_URL": "http://127.0.0.1:1"})  # local down
+    got = hc.list_assets()
+    assert len(got) == 1100                        # every page pulled on fallback
+
+
 def test_health_reports_outbox_counts(tmp_path):
     hc = HybridClient(_pipeline(tmp_path), central=DownCentral(),
                       os_env={"ASSETCORE_LOCAL_URL": "http://127.0.0.1:1"})

@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from assetcore.app.services import AssetcoreService, DeclareConflict
+from assetcore.core.errors import VersionConflict
 from assetcore.service import auth
 from assetcore.service.events import event_source
 from assetcore.service.schemas import (
@@ -144,7 +145,7 @@ async def claim(asset_id: UUID, body: ClaimRequest, service: AssetcoreService = 
     _require_asset(service, asset_id)
     try:
         service.claim(asset_id, body.display_name, body.taxonomy, body.actor,
-                      reactivate=body.reactivate, **body.attributes)
+                      reactivate=body.reactivate, attributes=body.attributes)
     except ValueError as exc:   # claiming a deprecated asset without reactivate=True
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(status_code=204)
@@ -187,7 +188,11 @@ async def bind_source(asset_id: UUID, body: BindSourceRequest,
                       service: AssetcoreService = Depends(get_service),
                       _: str = Depends(auth.require(auth.ARTIST))) -> VersionResponse:
     _require_asset(service, asset_id)
-    v = service.bind_source(asset_id, body.location_uri, body.tool, body.revision, body.published_by)
+    try:
+        v = service.bind_source(asset_id, body.location_uri, body.tool, body.revision, body.published_by)
+    except VersionConflict as exc:   # lost the version race past the retry budget -> retryable
+        raise HTTPException(status_code=503, detail=str(exc),
+                            headers={"Retry-After": "1"}) from exc
     return VersionResponse(version=v)
 
 
@@ -213,7 +218,11 @@ async def bind_runtime(asset_id: UUID, body: BindRuntimeRequest,
                        authority: str = Depends(auth.require(auth.ENGINE, auth.BUILD))) -> VersionResponse:
     _require_asset(service, asset_id)
     actor = body.actor if body.actor is not None else authority
-    v = service.bind_runtime(asset_id, body.location_uri, body.build_id, actor)
+    try:
+        v = service.bind_runtime(asset_id, body.location_uri, body.build_id, actor)
+    except VersionConflict as exc:   # lost the version race past the retry budget -> retryable
+        raise HTTPException(status_code=503, detail=str(exc),
+                            headers={"Retry-After": "1"}) from exc
     return VersionResponse(version=v)
 
 

@@ -60,9 +60,9 @@ class AssetcoreService:
         return DeclareResult(id=declared_id, created=True)
 
     def claim(self, asset_id: UUID, display_name: str, taxonomy: str, actor: str,
-              reactivate: bool = False, **attrs) -> None:
+              reactivate: bool = False, attributes: dict | None = None) -> None:
         verbs.claim(self.repo, self.sink, asset_id, display_name, taxonomy, actor,
-                    reactivate=reactivate, **attrs)
+                    reactivate=reactivate, attributes=attributes)
 
     def rename(self, asset_id: UUID, new_name: str, actor: str, new_taxonomy: str | None = None) -> None:
         verbs.rename(self.repo, self.sink, asset_id, new_name, actor, new_taxonomy)

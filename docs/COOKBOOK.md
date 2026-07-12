@@ -201,7 +201,7 @@ authoritative set (claiming with none clears them).
 
 ```python
 svc.claim(aid, "Weathered Barrel", "props/env/barrels", "pat",
-          biome="harbor", reusable=True)         # **attrs become identity.attributes
+          attributes={"biome": "harbor", "reusable": True})   # identity.attributes (a dict)
 
 c.claim(aid, "Weathered Barrel", "props/env/barrels", "pat",
         attributes={"biome": "harbor"})          # authority: production

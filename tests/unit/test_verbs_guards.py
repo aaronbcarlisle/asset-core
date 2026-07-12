@@ -53,7 +53,7 @@ def test_claim_reactivate_resurrects_deprecated_asset(rs):
 def test_claim_with_no_attrs_resets_attributes(rs):
     repo, sink = rs
     a = verbs.declare(repo, sink, "prop", "amy")
-    verbs.claim(repo, sink, a, "Barrel", "t", "pat", note="first")
+    verbs.claim(repo, sink, a, "Barrel", "t", "pat", attributes={"note": "first"})
     assert repo.get_identity(a).attributes == {"note": "first"}
     verbs.claim(repo, sink, a, "Barrel", "t", "pat")          # no attrs -> cleared
     assert repo.get_identity(a).attributes == {}

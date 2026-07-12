@@ -53,12 +53,15 @@ def declare(repo: AssetRepo, sink: EventSink, asset_type: str, created_by: str,
 # CLAIM — Production gives a provisional asset meaning (the backfill step).
 # ---------------------------------------------------------------------------
 def claim(repo: AssetRepo, sink: EventSink, asset_id: UUID, display_name: str,
-          taxonomy: str, actor: str, *, reactivate: bool = False, **attrs) -> None:
+          taxonomy: str, actor: str, *, reactivate: bool = False,
+          attributes: dict | None = None) -> None:
     """Production gives a provisional asset meaning — the backfill step.
 
     Sets the identity facet's display name + taxonomy and flips lifecycle to
-    ACTIVE. ``**attrs`` is an authoritative set of identity attributes (a claim
-    with none clears them). Raises ``ValueError`` if the asset is unknown.
+    ACTIVE. ``attributes`` is an authoritative set of identity attributes (a claim
+    with none clears them) — a plain dict, NOT splatted kwargs, so an attribute
+    named e.g. ``reactivate`` can't collide with a parameter. Raises ``ValueError``
+    if the asset is unknown.
 
     Claiming a DEPRECATED asset resurrects it — a real state change that must be
     deliberate, so it is refused unless ``reactivate=True`` is passed (otherwise a
@@ -75,7 +78,7 @@ def claim(repo: AssetRepo, sink: EventSink, asset_id: UUID, display_name: str,
             f"asset {asset_id} is deprecated; pass reactivate=True to resurrect it")
     identity.display_name = display_name
     identity.taxonomy = taxonomy
-    identity.attributes = dict(attrs)   # authoritative set: a claim with no attrs clears them
+    identity.attributes = dict(attributes or {})   # authoritative set: none -> cleared
     repo.save_identity(identity)
     repo.set_lifecycle(asset_id, Lifecycle.ACTIVE)
     sink.emit(Event(asset_id, "identity.claimed",
