@@ -145,12 +145,18 @@ aid = c.declare("prop", "amy", origin={"shot": "sq01"})   # authority: artist or
 ```
 
 ```bash
-assetcore declare --type prop --by amy            # prints the id
+assetcore declare --type prop --by amy --origin '{"shot":"sq01"}'   # prints the id
 curl -s -X POST localhost:8000/assets -H 'X-Assetcore-Token: artist-token' \
   -H 'content-type: application/json' \
   -d '{"asset_type":"prop","created_by":"amy","origin":{"shot":"sq01"}}'
 # -> {"id":"…"}  (HTTP 201)
 ```
+
+Passing an `id` makes declare **idempotent** (the offline-hub path mints the UUID
+client-side, then replays): re-declaring the same id with the same
+`asset_type`/`created_by` is a no-op and returns **200** instead of 201. Re-using
+that id with a *different* payload is a genuine collision, not a retry, and is
+rejected with **409**.
 
 ### Resolve
 
@@ -175,6 +181,18 @@ curl -s localhost:8000/assets/<id>            # open — no token needed
 
 A resolve of an unknown id → **404** over HTTP (`meta` is `None` in-process).
 
+`resolve` returns only the *latest* source/runtime. For the full history:
+
+```python
+c.source_versions(aid)   # [{version_num, location_uri, tool, revision, is_latest}, …] ascending
+c.runtime_versions(aid)  # [{version_num, location_uri, build_id, is_latest}, …]
+```
+```bash
+assetcore history <id>                 # source history (default)
+assetcore history <id> --facet runtime
+curl -s localhost:8000/assets/<id>/source/versions
+```
+
 ### Claim
 
 Production gives a provisional asset meaning — the backfill step. Sets
@@ -183,14 +201,27 @@ authoritative set (claiming with none clears them).
 
 ```python
 svc.claim(aid, "Weathered Barrel", "props/env/barrels", "pat",
-          biome="harbor", reusable=True)         # **attrs become identity.attributes
+          attributes={"biome": "harbor", "reusable": True})   # identity.attributes (a dict)
 
 c.claim(aid, "Weathered Barrel", "props/env/barrels", "pat",
         attributes={"biome": "harbor"})          # authority: production
 ```
 
 ```bash
-assetcore claim <id> --name "Weathered Barrel" --taxonomy props/env/barrels --actor pat
+assetcore claim <id> --name "Weathered Barrel" --taxonomy props/env/barrels --actor pat \
+  --attr biome=harbor --attr reusable=yes         # --attr is repeatable (authoritative set)
+```
+
+Claiming a **deprecated** asset resurrects it, which must be deliberate: it is
+refused (**409**) unless you pass `reactivate=True` (`--reactivate` on the CLI), so
+a routine backfill can't silently un-retire something. The reactivating claim emits
+`identity.claimed` with `reactivated: true`.
+
+```python
+c.claim(aid, "Barrel Redux", "props/env/barrels", "pat", reactivate=True)
+```
+```bash
+assetcore claim <id> --name "Barrel Redux" --taxonomy props/env/barrels --actor pat --reactivate
 ```
 
 ### Rename
@@ -250,9 +281,11 @@ assetcore bind-runtime <id> /Game/Props/Barrel.uasset --build nightly-4821
 
 Assert a **new** typed edge between two identities. `binding_mode`/`pinned_version`
 are valid only on `DEPENDS_ON`. Self-edges and a binding_mode on a non-`DEPENDS_ON`
-edge are rejected (**400** over HTTP). For `DERIVED_FROM`, the edge records the
-parent's current source version so [staleness](#stale-derivations) can be detected
-later.
+edge are rejected (**400** over HTTP). A `pin` binding **must** carry a
+`pinned_version` (a pin with none would resolve to nothing — rejected **400**);
+conversely a `pinned_version` is only accepted with `pin`. For `DERIVED_FROM`, the
+edge records the parent's current source version so [staleness](#stale-derivations)
+can be detected later.
 
 ```python
 from assetcore.core.types import RelType, BindingMode
@@ -416,7 +449,8 @@ For directory-wide moves across many assets, see
 
 Retire an identity (lifecycle → `deprecated`). Reversible (it's a flag, not a
 delete) and never strips facets or edges — `dependents` still finds who's on it, so
-the retire is safe and auditable. Check `dependents` first.
+the retire is safe and auditable. Check `dependents` first. To bring it back, use a
+reactivating claim (`claim(..., reactivate=True)`) — a plain claim refuses.
 
 ```python
 svc.dependents(old_barrel)          # see who'd be affected
@@ -453,11 +487,17 @@ oldest first, with their birth context.
 ```python
 svc.backfill_worklist()             # [(asset, identity), …]
 c.backfill_worklist()               # [{id, asset_type, created_by, created_at, origin, …}]
+c.backfill_worklist(limit=100, offset=0)   # paged
 ```
 
 ```bash
 assetcore worklist
 ```
+
+Both `worklist` and `list_assets` (`GET /assets`) page with `limit` (default 500,
+max 5000) + `offset`, in a stable `(created_at, id)` order. The service resolves a
+whole page with a fixed number of queries (batch identity/source/runtime lookups),
+so listing stays flat as the catalog grows — no per-asset round-trips.
 
 ### Bulk operations
 
@@ -675,7 +715,7 @@ treatment + how to add a provider: [`PROVIDER_LAYER.md`](PROVIDER_LAYER.md) and
 ## 7. End-to-end: the three canonical scenarios
 
 Worked with the in-process service (run as a script, or adapt to the SDK). These are
-the same scenarios the suite proves in `tests/test_scenarios.py`.
+the same scenarios the suite proves in `tests/unit/test_scenarios.py`.
 
 ### The barrel — reuse instead of copy-paste
 

@@ -21,6 +21,7 @@ from assetcore.core.entities import (
     RuntimeVersion,
     SourceVersion,
 )
+from assetcore.core.errors import VersionConflict
 from assetcore.core.types import BindingMode, Lifecycle, RelType
 
 _SCHEMA_PATH = pathlib.Path(__file__).parent / "schema.sql"
@@ -86,7 +87,8 @@ class PostgresRepo:
         )
 
     def list_assets(self, asset_type: str | None = None,
-                    lifecycle: Lifecycle | None = None) -> list[Asset]:
+                    lifecycle: Lifecycle | None = None,
+                    created_by: str | None = None) -> list[Asset]:
         sql, params = "SELECT * FROM asset", []
         clauses = []
         if asset_type is not None:
@@ -95,6 +97,9 @@ class PostgresRepo:
         if lifecycle is not None:
             clauses.append("lifecycle = %s")
             params.append(Lifecycle(lifecycle).value)
+        if created_by is not None:
+            clauses.append("created_by = %s")
+            params.append(created_by)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         return [
@@ -104,6 +109,39 @@ class PostgresRepo:
             )
             for r in self._all(sql, tuple(params))
         ]
+
+    def identities(self, asset_ids: list[UUID]) -> dict[UUID, IdentityFacet]:
+        if not asset_ids:
+            return {}
+        rows = self._all(
+            "SELECT * FROM facet_identity WHERE asset_id = ANY(%s)", (list(asset_ids),))
+        return {r["asset_id"]: IdentityFacet(
+            asset_id=r["asset_id"], display_name=r["display_name"], taxonomy=r["taxonomy"],
+            status=r["status"], tags=list(r["tags"]), attributes=r["attributes"],
+        ) for r in rows}
+
+    def latest_sources(self, asset_ids: list[UUID]) -> dict[UUID, SourceVersion]:
+        if not asset_ids:
+            return {}
+        rows = self._all(
+            "SELECT * FROM facet_source_version WHERE is_latest AND asset_id = ANY(%s)",
+            (list(asset_ids),))
+        return {r["asset_id"]: SourceVersion(
+            asset_id=r["asset_id"], location_uri=r["location_uri"], tool=r["tool"],
+            revision=r["revision"], version_num=r["version_num"], is_latest=r["is_latest"],
+            published_by=r["published_by"], published_at=r["published_at"],
+        ) for r in rows}
+
+    def latest_runtimes(self, asset_ids: list[UUID]) -> dict[UUID, RuntimeVersion]:
+        if not asset_ids:
+            return {}
+        rows = self._all(
+            "SELECT * FROM facet_runtime_version WHERE is_latest AND asset_id = ANY(%s)",
+            (list(asset_ids),))
+        return {r["asset_id"]: RuntimeVersion(
+            asset_id=r["asset_id"], location_uri=r["location_uri"], build_id=r["build_id"],
+            version_num=r["version_num"], is_latest=r["is_latest"], cooked_at=r["cooked_at"],
+        ) for r in rows}
 
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
         row = self._one("SELECT * FROM facet_identity WHERE asset_id = %s", (asset_id,))
@@ -128,19 +166,29 @@ class PostgresRepo:
             cur.execute("UPDATE asset SET lifecycle=%s WHERE id=%s",
                         (Lifecycle(lifecycle).value, asset_id))
 
+    def _as_version_conflict(self, exc) -> None:
+        # 23505 = unique_violation -> a concurrent writer took this version number;
+        # retryable. Re-raise FK / other integrity errors unchanged.
+        if getattr(exc, "pgcode", None) == "23505":
+            raise VersionConflict(str(exc)) from exc
+        raise exc
+
     # --- source facet ---
     def add_source_version(self, v: SourceVersion) -> None:
-        with self.conn, self.conn.cursor() as cur:   # demote + insert in one tx
-            cur.execute(
-                "UPDATE facet_source_version SET is_latest=FALSE WHERE asset_id=%s AND is_latest",
-                (v.asset_id,))
-            cur.execute(
-                "INSERT INTO facet_source_version"
-                " (asset_id, location_uri, tool, revision, version_num, is_latest, published_at, published_by)"
-                " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-                (v.asset_id, v.location_uri, v.tool, v.revision, v.version_num,
-                 v.is_latest, v.published_at, v.published_by),
-            )
+        try:
+            with self.conn, self.conn.cursor() as cur:   # demote + insert in one tx
+                cur.execute(
+                    "UPDATE facet_source_version SET is_latest=FALSE WHERE asset_id=%s AND is_latest",
+                    (v.asset_id,))
+                cur.execute(
+                    "INSERT INTO facet_source_version"
+                    " (asset_id, location_uri, tool, revision, version_num, is_latest, published_at, published_by)"
+                    " VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+                    (v.asset_id, v.location_uri, v.tool, v.revision, v.version_num,
+                     v.is_latest, v.published_at, v.published_by),
+                )
+        except self._psycopg2.IntegrityError as exc:
+            self._as_version_conflict(exc)
 
     def update_source_location(self, asset_id: UUID, new_location_uri: str,
                                new_revision: str | None = None) -> bool:
@@ -168,16 +216,19 @@ class PostgresRepo:
 
     # --- runtime facet ---
     def add_runtime_version(self, v: RuntimeVersion) -> None:
-        with self.conn, self.conn.cursor() as cur:
-            cur.execute(
-                "UPDATE facet_runtime_version SET is_latest=FALSE WHERE asset_id=%s AND is_latest",
-                (v.asset_id,))
-            cur.execute(
-                "INSERT INTO facet_runtime_version"
-                " (asset_id, location_uri, build_id, version_num, is_latest, cooked_at)"
-                " VALUES (%s, %s, %s, %s, %s, %s)",
-                (v.asset_id, v.location_uri, v.build_id, v.version_num, v.is_latest, v.cooked_at),
-            )
+        try:
+            with self.conn, self.conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE facet_runtime_version SET is_latest=FALSE WHERE asset_id=%s AND is_latest",
+                    (v.asset_id,))
+                cur.execute(
+                    "INSERT INTO facet_runtime_version"
+                    " (asset_id, location_uri, build_id, version_num, is_latest, cooked_at)"
+                    " VALUES (%s, %s, %s, %s, %s, %s)",
+                    (v.asset_id, v.location_uri, v.build_id, v.version_num, v.is_latest, v.cooked_at),
+                )
+        except self._psycopg2.IntegrityError as exc:
+            self._as_version_conflict(exc)
 
     def update_runtime_location(self, asset_id: UUID, new_location_uri: str) -> bool:
         with self.conn, self.conn.cursor() as cur:

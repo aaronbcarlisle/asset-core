@@ -13,10 +13,11 @@ lint-imports          # or: python -c "from importlinter.cli import lint_imports
 ```
 
 Contracts live in `pyproject.toml [tool.importlinter]`: inward-only layering
-(service → infra → app → core), the SDK-over-HTTP firewall, and the integrations
-firewall. CI must run this; a PR that does `import maya` in `core/` fails here.
-The AST source-scan in `tests/contract/test_sdk_firewall.py` is a zero-dependency
-backstop that runs in the normal test suite.
+(service → infra → app → core), the SDK-over-HTTP firewall, the integrations
+firewall, and the SDK-never-imports-integrations rule (4 contracts). CI runs this
+on every PR/push (`.github/workflows/test.yml`); a PR that does `import maya` in
+`core/` fails there. The AST source-scan in `tests/contract/test_sdk_firewall.py`
+is a zero-dependency backstop that runs in the normal test suite.
 
 ## Config validation (assetcore.toml — fail fast before deploy)
 
@@ -48,9 +49,32 @@ ASSETCORE_DSN=sqlite:///check.db alembic -c assetcore/db/alembic.ini upgrade hea
 ASSETCORE_DSN=postgresql://user:pass@host/assetcore alembic -c assetcore/db/alembic.ini upgrade head
 ```
 
-> Keep `schema.sql` and the migration in sync (they are two expressions of the
-> same five tables). A future cleanup can have `postgres_repo` bootstrap via
-> Alembic so there is a single source.
+> `infra/schema.sql` and the migration are kept in sync (two expressions of the
+> same tables) — `tests/integration/test_schema_parity.py` fails the build if they
+> drift. A future cleanup can have `postgres_repo` bootstrap via Alembic so there
+> is a single source.
+
+## Authentication (dev-grade — fail closed in prod)
+
+Auth is a token→authority map (`X-Assetcore-Token` header). The built-in defaults
+(`prod-token`, `artist-token`, `engine-token`, `build-token`) are **well-known dev
+tokens** — convenient locally, dangerous exposed.
+
+- Set `ASSETCORE_TOKENS` (JSON `{"<token>": "<authority>"}`) to your real tokens.
+- If it's unset the service logs a loud warning and falls back to the dev tokens.
+- Set `ASSETCORE_REQUIRE_TOKENS=1` to **fail startup** rather than fall back — the
+  production-safe posture (a misconfigured deploy refuses to run with dev tokens).
+
+Signed identities / real RBAC are out of scope here (they need a studio identity
+decision — OIDC/LDAP); `ASSETCORE_REQUIRE_TOKENS` closes the immediate hole.
+
+## Request correlation
+
+Every response carries an `X-Request-ID` (minted per request, or echoed from an
+inbound `X-Request-ID`), and the service logs one structured line per request
+(`method=… path=… status=… duration_ms=… request_id=…`). Logging handlers are the
+host's to configure (uvicorn sets them up); the library never hijacks the root
+logger.
 
 ## Observability
 
@@ -85,6 +109,20 @@ raise SystemExit(run(adapter, threshold=100.0))   # non-zero exit fails the buil
 - The durable log is the source of truth; the live push (SSE / Postgres NOTIFY) is
   the low-latency hint. A dropped SSE connection resumes by sending the last seq it
   saw as the `Last-Event-ID` header — the server replays the gap, then follows.
+- **BroadcastSink limits (single-process, in-memory).** The in-process
+  BroadcastSink log is bounded (`max_log`, default 10k) and its `seq` **resets on
+  process restart**:
+  - A subscriber resuming from before the retained horizon gets a `gap` SSE frame
+    (`event: gap`, `stream.gap`) and should re-sync from full state — it is *told*,
+    never silently short. Size `max_log` above your worst-case reconnect backlog
+    (`create_app(sink=BroadcastSink(max_log=N))`).
+  - Because `seq` resets on restart and each uvicorn worker has its **own**
+    in-memory sink, BroadcastSink is for **single-process** deployments. Durable,
+    cross-restart, multi-worker resume is the NotifySink (durable `event` table)
+    territory below.
+  - `NotifySink.emit` skips only the NOTIFY *hint* when a payload exceeds Postgres's
+    8000-byte limit (logs a warning); the durable row is still written and
+    subscribers catch up from the table by seq.
 - In production, `infra/notify_sink.NotifySink` is the `EventSink` for the *emit*
   side (durable `event` table + Postgres NOTIFY) — a clean swap for BroadcastSink's
   emit. It does **not** implement the subscribe/stream API, so it does not by

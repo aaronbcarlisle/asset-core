@@ -74,14 +74,39 @@ def test_replay_dispatches_all_verbs(tmp_path):
 
 
 def test_replay_skips_already_applied_bind(tmp_path):
+    # exact match (same location AND revision) -> our write already landed -> skip
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "bind_source", {"asset_id": "id-1", "location_uri": "//d/a.ma", "tool": "maya",
+                                "revision": "3", "published_by": "a"}, asset_id="id-1")
+    client = FakeClient(existing_sources={"id-1": {"location_uri": "//d/a.ma", "tool": "maya", "revision": "3"}})
+    result = replay_outbox(db, client)
+    assert result["skipped"] == 1 and result["replayed"] == 0
+    assert client.calls == []
+    assert pending_count(db) == 0
+
+
+def test_replay_reapplies_bind_when_revision_differs(tmp_path):
+    # central at a DIFFERENT revision: opaque revisions have no order, so the queued
+    # write is dispatched (lands as a new version), never silently dropped.
     db = open_outbox(str(tmp_path / "o.db"))
     enqueue(db, "bind_source", {"asset_id": "id-1", "location_uri": "//d/a.ma", "tool": "maya",
                                 "revision": "3", "published_by": "a"}, asset_id="id-1")
     client = FakeClient(existing_sources={"id-1": {"location_uri": "//d/a.ma", "tool": "maya", "revision": "5"}})
     result = replay_outbox(db, client)
-    assert result["skipped"] == 1 and result["replayed"] == 0
-    assert client.calls == []
-    assert pending_count(db) == 0
+    assert result["replayed"] == 1 and result["skipped"] == 0
+    assert client.calls == [("bind_source", "id-1", "//d/a.ma")]
+
+
+def test_replay_bind_idempotency_is_not_string_ordered(tmp_path):
+    # regression: the old check compared revisions as strings, so "9" >= "10" was
+    # True and a real pending write got wrongly skipped. Exact-match fixes it.
+    assert "9" >= "10"                                   # the trap, made explicit
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "bind_source", {"asset_id": "id-1", "location_uri": "//d/a.ma", "tool": "maya",
+                                "revision": "10", "published_by": "a"}, asset_id="id-1")
+    client = FakeClient(existing_sources={"id-1": {"location_uri": "//d/a.ma", "tool": "maya", "revision": "9"}})
+    result = replay_outbox(db, client)
+    assert result["replayed"] == 1 and result["skipped"] == 0   # NOT skipped
 
 
 def test_replay_holds_later_entries_for_failed_asset(tmp_path):
@@ -96,6 +121,81 @@ def test_replay_holds_later_entries_for_failed_asset(tmp_path):
     assert ("relocate", "id-1", "//d/z.ma") not in client.calls
     failed = list_failed(db)
     assert all("central rejected" in (f["error"] or "") for f in failed)
+
+
+class _FakeResponse:
+    def __init__(self, status_code, text):
+        self.status_code = status_code
+        self.text = text
+
+
+class _FakeHTTPError(Exception):
+    def __init__(self, status_code, text):
+        super().__init__(text)
+        self.response = _FakeResponse(status_code, text)
+
+
+def test_replay_declare_skips_only_on_matching_payload(tmp_path):
+    # existing asset with the SAME payload -> already applied (skipped)
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "declare", {"id": "id-1", "asset_type": "prop", "created_by": "amy"}, asset_id="id-1")
+
+    class MatchClient(FakeClient):
+        def resolve(self, asset_id):
+            return {"id": asset_id, "meta": {"asset_type": "prop", "created_by": "amy"}}
+
+    result = replay_outbox(db, MatchClient())
+    assert result["skipped"] == 1 and result["replayed"] == 0
+
+
+def test_replay_declare_dispatches_on_payload_mismatch(tmp_path):
+    # existing asset with a DIFFERENT payload -> genuine collision, must NOT be
+    # silently skipped; it dispatches (central would 409) and surfaces as failed.
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "declare", {"id": "id-1", "asset_type": "set", "created_by": "amy"}, asset_id="id-1")
+
+    class MismatchClient(FakeClient):
+        def resolve(self, asset_id):
+            return {"id": asset_id, "meta": {"asset_type": "prop", "created_by": "amy"}}
+        def declare(self, *a, **kw):
+            raise _FakeHTTPError(409, "asset id-1 already exists as ('prop', ...)")
+
+    result = replay_outbox(db, MismatchClient())
+    assert result["skipped"] == 0 and result["failed"] == 1     # collision surfaced
+
+
+def test_replay_treats_duplicate_edge_as_applied(tmp_path):
+    # a relate that already reached central (crash between the write and mark_done)
+    # comes back as 400 "duplicate edge" -> already-applied, NOT a failure/hold.
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "relate", {"from_asset": "id-1", "to_asset": "id-2",
+                           "rel_type": "DEPENDS_ON", "actor": "a"}, asset_id="id-1")
+    enqueue(db, "rename", {"asset_id": "id-1", "new_name": "hero", "actor": "a"}, asset_id="id-1")
+
+    class DupEdgeClient(FakeClient):
+        def relate(self, *a, **kw):
+            raise _FakeHTTPError(400, "duplicate edge: id-1-DEPENDS_ON->id-2")
+
+    client = DupEdgeClient()
+    result = replay_outbox(db, client)
+    assert result["skipped"] == 1          # the duplicate relate: treated as applied
+    assert result["replayed"] == 1         # the following rename still runs
+    assert result["failed"] == 0 and result["held"] == 0
+    assert pending_count(db) == 0          # outbox drained, not poisoned
+
+
+def test_replay_real_relate_failure_still_fails(tmp_path):
+    # a non-duplicate error (e.g. 500 / connection) is a genuine failure + hold.
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "relate", {"from_asset": "id-1", "to_asset": "id-2",
+                           "rel_type": "DEPENDS_ON", "actor": "a"}, asset_id="id-1")
+
+    class BrokenClient(FakeClient):
+        def relate(self, *a, **kw):
+            raise _FakeHTTPError(500, "internal server error")
+
+    result = replay_outbox(db, BrokenClient())
+    assert result["failed"] == 1 and result["skipped"] == 0
 
 
 def test_retry_failed_resets_to_pending(tmp_path):
@@ -131,7 +231,7 @@ class UpCentral:
     def __init__(self):
         self.calls = []
     def ping(self): return True
-    def declare(self, asset_type, actor, asset_id=None):
+    def declare(self, asset_type, created_by, origin=None, asset_id=None):
         self.calls.append(("declare", asset_type, asset_id))
         return {"id": asset_id, "asset_type": asset_type}
     def bind_source(self, asset_id, location_uri, tool, revision, actor):
@@ -141,19 +241,22 @@ class UpCentral:
 
 def test_offline_declare_queues_and_patches_replica(tmp_path):
     hc = HybridClient(_pipeline(tmp_path), central=DownCentral())
-    result = hc.declare("model", actor="jsmith")
+    result = hc.declare("model", "jsmith")
     asset_id = result["id"]
     uuid.UUID(asset_id)                              # client-minted UUID (spec §5.3)
     ob = open_outbox(str(tmp_path / "outbox.db"))
     assert pending_count(ob) == 1                    # queued for replay
     rep = open_replica(str(tmp_path / "assetcore.db"))
-    assert get_asset(rep, asset_id)["asset_type"] == "model"   # optimistic local patch
+    # optimistic local patch, stored in the central resolve() shape
+    record = get_asset(rep, asset_id)
+    assert record["asset_type"] == "model"
+    assert record["meta"]["lifecycle"] == "provisional"
 
 
 def test_online_declare_goes_to_central_with_client_id(tmp_path):
     central = UpCentral()
     hc = HybridClient(_pipeline(tmp_path), central=central)
-    result = hc.declare("model", actor="jsmith")
+    result = hc.declare("model", "jsmith")
     assert central.calls[0][0] == "declare"
     assert central.calls[0][2] == result["id"]       # client id passed through
     ob = open_outbox(str(tmp_path / "outbox.db"))
@@ -163,17 +266,33 @@ def test_online_declare_goes_to_central_with_client_id(tmp_path):
 def test_read_falls_back_to_central_when_local_down(tmp_path, monkeypatch):
     class CentralWithRead(UpCentral):
         def resolve(self, asset_id):
-            return {"asset": {"id": asset_id, "name": "x", "asset_type": "model"}, "dependencies": []}
+            # central ResolveResponse shape (id/meta/identity/source/runtime)
+            return {"id": asset_id, "meta": {"id": asset_id, "asset_type": "model"},
+                    "identity": None, "source": None, "runtime": None}
     hc = HybridClient(_pipeline(tmp_path), central=CentralWithRead(),
                       os_env={"ASSETCORE_LOCAL_URL": "http://127.0.0.1:1"})  # nothing listens
     out = hc.resolve("a1")
-    assert out["asset"]["id"] == "a1"
+    assert out["id"] == "a1"
+
+
+def test_list_assets_central_fallback_pages_all(tmp_path):
+    # local reader down -> central fallback must page past limit=500, not truncate
+    class PagingCentral:
+        def __init__(self):
+            self.rows = [{"id": f"a{i}"} for i in range(1100)]
+        def list_assets(self, created_by=None, taxonomy_prefix=None, updated_since=None,
+                        limit=None, offset=0):
+            return self.rows[offset:offset + limit] if limit is not None else self.rows[offset:]
+    hc = HybridClient(_pipeline(tmp_path), central=PagingCentral(),
+                      os_env={"ASSETCORE_LOCAL_URL": "http://127.0.0.1:1"})  # local down
+    got = hc.list_assets()
+    assert len(got) == 1100                        # every page pulled on fallback
 
 
 def test_health_reports_outbox_counts(tmp_path):
     hc = HybridClient(_pipeline(tmp_path), central=DownCentral(),
                       os_env={"ASSETCORE_LOCAL_URL": "http://127.0.0.1:1"})
-    hc.declare("model", actor="jsmith")
+    hc.declare("model", "jsmith")
     h = hc.health()
     assert h["central"] == "down" and h["local_reader"] == "down"
     assert h["outbox_pending"] == 1 and h["outbox_failed"] == 0

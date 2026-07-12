@@ -77,3 +77,9 @@ forbidden_modules = [
     "assetcore.infra",
     "assetcore.service",
 ]
+
+[[tool.importlinter.contracts]]
+name = "SDK does not depend on integrations (L3 never reaches up to L4)"
+type = "forbidden"
+source_modules = ["assetcore.sdk"]
+forbidden_modules = ["assetcore.integrations"]

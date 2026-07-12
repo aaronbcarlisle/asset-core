@@ -60,10 +60,10 @@ class AssetcoreClient:
         return self._post("/assets", body).json()["id"]
 
     def claim(self, asset_id: str, display_name: str, taxonomy: str, actor: str,
-              attributes: dict | None = None) -> None:
+              attributes: dict | None = None, reactivate: bool = False) -> None:
         self._post(f"/assets/{asset_id}/claim", {
             "display_name": display_name, "taxonomy": taxonomy, "actor": actor,
-            "attributes": attributes or {},
+            "attributes": attributes or {}, "reactivate": reactivate,
         })
 
     def rename(self, asset_id: str, new_name: str, actor: str,
@@ -78,9 +78,11 @@ class AssetcoreClient:
             "published_by": published_by,
         }).json()["version"]
 
-    def bind_runtime(self, asset_id: str, location_uri: str, build_id: str) -> int:
+    def bind_runtime(self, asset_id: str, location_uri: str, build_id: str,
+                     actor: str | None = None) -> int:
         return self._post(f"/assets/{asset_id}/runtime",
-                          {"location_uri": location_uri, "build_id": build_id}).json()["version"]
+                          {"location_uri": location_uri, "build_id": build_id,
+                           "actor": actor}).json()["version"]
 
     def relate(self, from_asset: str, to_asset: str, rel_type: str,
                binding_mode: str | None = None, pinned_version: int | None = None,
@@ -91,17 +93,18 @@ class AssetcoreClient:
         })
 
     def set_binding(self, from_asset: str, to_asset: str, binding_mode: str,
-                    pinned_version: int | None = None) -> None:
+                    pinned_version: int | None = None, actor: str | None = None) -> None:
         self._post("/set_binding", {
             "from_asset": from_asset, "to_asset": to_asset,
-            "binding_mode": binding_mode, "pinned_version": pinned_version,
+            "binding_mode": binding_mode, "pinned_version": pinned_version, "actor": actor,
         })
 
     def resolve(self, asset_id: str) -> dict:
         return self._get(f"/assets/{asset_id}").json()
 
     def list_assets(self, created_by: str | None = None, taxonomy_prefix: str | None = None,
-                    updated_since: str | None = None) -> list[dict]:
+                    updated_since: str | None = None, limit: int | None = None,
+                    offset: int | None = None) -> list[dict]:
         params: dict[str, Any] = {}
         if created_by is not None:
             params["created_by"] = created_by
@@ -109,10 +112,22 @@ class AssetcoreClient:
             params["taxonomy_prefix"] = taxonomy_prefix
         if updated_since is not None:
             params["updated_since"] = updated_since
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
         return self._get("/assets", params if params else None).json()
 
     def get_source(self, asset_id: str) -> dict | None:
         return self.resolve(asset_id).get("source")
+
+    def source_versions(self, asset_id: str) -> list[dict]:
+        """Full source version history (ascending)."""
+        return self._get(f"/assets/{asset_id}/source/versions").json()
+
+    def runtime_versions(self, asset_id: str) -> list[dict]:
+        """Full runtime version history (ascending)."""
+        return self._get(f"/assets/{asset_id}/runtime/versions").json()
 
     def resolve_dependency(self, from_asset: str, to_asset: str) -> dict | None:
         return self._get("/dependency", {"frm": from_asset, "to": to_asset}).json()
@@ -129,8 +144,14 @@ class AssetcoreClient:
             params["asset_type"] = asset_type
         return self._get("/similar", params).json()
 
-    def backfill_worklist(self) -> list[dict]:
-        return self._get("/worklist/provisional").json()
+    def backfill_worklist(self, limit: int | None = None,
+                          offset: int | None = None) -> list[dict]:
+        params: dict[str, Any] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+        return self._get("/worklist/provisional", params or None).json()
 
     def floating_dependencies(self, asset_id: str) -> list[dict]:
         return self._get(f"/assets/{asset_id}/floating-dependencies").json()

@@ -50,10 +50,19 @@ def validate_relationship(r: Relationship) -> None:
     """Relationship validity. Raises ValueError on an invalid edge.
 
     - binding_mode is meaningful only on DEPENDS_ON edges.
+    - a PIN edge MUST carry a pinned_version (otherwise resolve_dependency_version
+      finds nothing and the consumer silently loads NOTHING — the exact footgun
+      float/pin exists to prevent).
+    - pinned_version is meaningful only when pinning (a stray pin on a float/unset
+      edge is a caller mistake, not a silent no-op).
     - no trivial self-referential edge.
     """
     if r.binding_mode is not None and r.rel_type != RelType.DEPENDS_ON:
         raise ValueError("binding_mode is only valid on DEPENDS_ON edges")
+    if r.binding_mode == BindingMode.PIN and r.pinned_version is None:
+        raise ValueError("a PIN binding requires a pinned_version")
+    if r.binding_mode != BindingMode.PIN and r.pinned_version is not None:
+        raise ValueError("pinned_version is only valid on a PIN binding")
     if r.from_asset == r.to_asset:
         raise ValueError("self-referential edge")
 

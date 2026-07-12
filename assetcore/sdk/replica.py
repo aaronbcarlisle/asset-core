@@ -15,9 +15,10 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS assets (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    asset_type TEXT NOT NULL,
+    asset_type TEXT,
     status TEXT,
     created_by TEXT,
+    taxonomy TEXT,
     updated_at TEXT,
     payload_json TEXT NOT NULL
 );
@@ -32,24 +33,80 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
 
+_ASSETS_COLUMNS = ("id", "name", "asset_type", "status", "created_by",
+                   "taxonomy", "updated_at", "payload_json")
+
+
 def open_replica(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
-    conn.executescript(_SCHEMA)
+    conn.executescript(_SCHEMA)     # creates missing tables at the CURRENT schema
+    _migrate_assets(conn)           # upgrade a pre-existing cache in place
     return conn
 
 
+def _migrate_assets(conn: sqlite3.Connection) -> None:
+    """Bring an older replica's `assets` table up to the current schema in place.
+
+    A cache created by an earlier version lacks the extracted `taxonomy` column and
+    has `asset_type NOT NULL`; `upsert_asset` would then fail ("no such column" or a
+    NOT NULL violation on offline/partial records). Rebuild the table preserving
+    overlapping rows so an existing hub cache upgrades without a manual delete /
+    full re-hydrate. (The replica is a cache; the outbox is the durable queue.)
+    """
+    info = conn.execute("PRAGMA table_info(assets)").fetchall()
+    if not info:
+        return
+    cols = {r["name"] for r in info}
+    asset_type_not_null = any(r["name"] == "asset_type" and r["notnull"] == 1 for r in info)
+    if "taxonomy" in cols and not asset_type_not_null:
+        return   # already current — no rebuild
+    carried = [c for c in _ASSETS_COLUMNS if c in cols]
+    collist = ", ".join(carried)
+    with conn:
+        conn.execute("ALTER TABLE assets RENAME TO _assets_legacy")
+        conn.executescript(
+            "CREATE TABLE assets ("
+            " id TEXT PRIMARY KEY, name TEXT NOT NULL, asset_type TEXT, status TEXT,"
+            " created_by TEXT, taxonomy TEXT, updated_at TEXT, payload_json TEXT NOT NULL);")
+        conn.execute(f"INSERT INTO assets ({collist}) SELECT {collist} FROM _assets_legacy")
+        conn.execute("DROP TABLE _assets_legacy")
+
+
+def _record_updated_at(record: dict) -> str | None:
+    """The 'last touched' timestamp for incremental hydrate, mirroring the central
+    service's list_assets `updated_since` math: max of created_at, the latest
+    source's published_at, and the latest runtime's cooked_at."""
+    stamps = [record.get("created_at")]
+    src = record.get("source") or {}
+    stamps.append(src.get("published_at"))
+    rt = record.get("runtime") or {}
+    stamps.append(rt.get("cooked_at"))
+    present = [s for s in stamps if s]
+    return max(present) if present else None
+
+
 def upsert_asset(conn: sqlite3.Connection, asset: dict) -> None:
+    """Store a resolve-shaped record. The full record rides in payload_json (so the
+    local reader can serve the exact central shapes); the filterable fields
+    (created_by, taxonomy, updated_at) are extracted into columns."""
+    identity = asset.get("identity") or {}
+    meta = asset.get("meta") or {}
+    name = identity.get("display_name") or asset.get("name") or asset["id"]
+    asset_type = asset.get("asset_type") or meta.get("asset_type")
+    status = identity.get("status") if identity else asset.get("status")
+    created_by = asset.get("created_by") or meta.get("created_by")
+    taxonomy = identity.get("taxonomy")
+    updated_at = asset.get("updated_at") or _record_updated_at(asset)
     conn.execute(
-        "INSERT INTO assets (id, name, asset_type, status, created_by, updated_at, payload_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO assets (id, name, asset_type, status, created_by, taxonomy, updated_at, payload_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET name=excluded.name, asset_type=excluded.asset_type, "
-        "status=excluded.status, created_by=excluded.created_by, "
+        "status=excluded.status, created_by=excluded.created_by, taxonomy=excluded.taxonomy, "
         "updated_at=excluded.updated_at, payload_json=excluded.payload_json",
-        (asset["id"], asset.get("name", asset["id"]), asset.get("asset_type"), asset.get("status"),
-         asset.get("created_by"), asset.get("updated_at"), json.dumps(asset)),
+        (asset["id"], name, asset_type, status, created_by, taxonomy, updated_at, json.dumps(asset)),
     )
 
 
@@ -81,13 +138,30 @@ def _atomic_replace(src: str, dst: str) -> None:
     raise last_err  # type: ignore[misc]
 
 
+_HYDRATE_PAGE = 500
+
+
+def _list_all(client, **filters) -> list[dict]:
+    """Page through client.list_assets() to completion — /assets defaults to
+    limit=500, so a single call would silently truncate a large catalog."""
+    out: list[dict] = []
+    offset = 0
+    while True:
+        page = client.list_assets(limit=_HYDRATE_PAGE, offset=offset, **filters)
+        out.extend(page)
+        if len(page) < _HYDRATE_PAGE:
+            return out
+        offset += _HYDRATE_PAGE
+
+
 def hydrate_cache(pipeline: PipelineConfig, ctx: HubContext, client, now_iso: str) -> dict:
     project = pipeline.scope.get("assetcore_project", "")
     prefix = project
     since = (datetime.fromisoformat(now_iso.replace("Z", "+00:00")) - timedelta(days=pipeline.recent_days)).isoformat()
-    # seed set: user's authored assets + recently touched (spec §5.2 steps 1)
-    seeds = {a["id"]: a for a in client.list_assets(created_by=ctx["user_name"], taxonomy_prefix=prefix)}
-    for a in client.list_assets(taxonomy_prefix=prefix, updated_since=since):
+    # seed set: user's authored assets + recently touched (spec §5.2 steps 1),
+    # paged so catalogs larger than one /assets page are fully hydrated.
+    seeds = {a["id"]: a for a in _list_all(client, created_by=ctx["user_name"], taxonomy_prefix=prefix)}
+    for a in _list_all(client, taxonomy_prefix=prefix, updated_since=since):
         seeds.setdefault(a["id"], a)
     # transitive dependency closure via BFS (spec §5.2 step 2) — edges from dependencies()
     tmp = pipeline.local_cache + ".tmp"
@@ -106,11 +180,23 @@ def hydrate_cache(pipeline: PipelineConfig, ctx: HubContext, client, now_iso: st
         resolved = client.resolve(aid)
         if resolved is None:
             continue
-        # flatten resolve response + seed fields for replica storage
-        row = {**seeds.get(aid, {})}
-        row.update({"id": aid, "name": (resolved.get("identity") or {}).get("display_name") or aid,
-                    "asset_type": (resolved.get("meta") or {}).get("asset_type")})
-        upsert_asset(conn, row)
+        # Build the record the local reader serves: the central resolve() shape
+        # (id/meta/identity/source/runtime), enriched with created_at from the
+        # list summary (resolve's meta carries no created_at). This is exactly what
+        # /resolve returns, and /assets is a projection of it — so local answers are
+        # shape-identical to central.
+        summary = seeds.get(aid, {})
+        record = {
+            "id": aid,
+            "asset_type": (resolved.get("meta") or {}).get("asset_type") or summary.get("asset_type"),
+            "created_by": (resolved.get("meta") or {}).get("created_by") or summary.get("created_by"),
+            "created_at": summary.get("created_at"),
+            "meta": resolved.get("meta"),
+            "identity": resolved.get("identity"),
+            "source": resolved.get("source"),
+            "runtime": resolved.get("runtime"),
+        }
+        upsert_asset(conn, record)
         assets += 1
         for dep in client.dependencies(aid):
             to_id = dep["asset_id"]

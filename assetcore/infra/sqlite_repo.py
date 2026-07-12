@@ -23,6 +23,7 @@ from assetcore.core.entities import (
     RuntimeVersion,
     SourceVersion,
 )
+from assetcore.core.errors import VersionConflict
 from assetcore.core.types import BindingMode, Lifecycle, RelType
 
 _SCHEMA_PATH = pathlib.Path(__file__).parent / "schema.sql"
@@ -97,7 +98,8 @@ class SqliteRepo:
         )
 
     def list_assets(self, asset_type: str | None = None,
-                    lifecycle: Lifecycle | None = None) -> list[Asset]:
+                    lifecycle: Lifecycle | None = None,
+                    created_by: str | None = None) -> list[Asset]:
         sql, params = "SELECT * FROM asset", []
         clauses = []
         if asset_type is not None:
@@ -106,16 +108,60 @@ class SqliteRepo:
         if lifecycle is not None:
             clauses.append("lifecycle = ?")
             params.append(Lifecycle(lifecycle).value)
+        if created_by is not None:
+            clauses.append("created_by = ?")
+            params.append(created_by)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
-        return [
-            Asset(
-                asset_type=r["asset_type"], created_by=r["created_by"], id=UUID(r["id"]),
-                lifecycle=Lifecycle(r["lifecycle"]), origin=json.loads(r["origin"]),
-                created_at=_parse_dt(r["created_at"]),
-            )
-            for r in self.conn.execute(sql, params).fetchall()
-        ]
+        return [self._row_to_asset(r) for r in self.conn.execute(sql, params).fetchall()]
+
+    @staticmethod
+    def _row_to_asset(r: sqlite3.Row) -> Asset:
+        return Asset(
+            asset_type=r["asset_type"], created_by=r["created_by"], id=UUID(r["id"]),
+            lifecycle=Lifecycle(r["lifecycle"]), origin=json.loads(r["origin"]),
+            created_at=_parse_dt(r["created_at"]),
+        )
+
+    def _in_clause(self, asset_ids: list[UUID]) -> tuple[str, list[str]]:
+        placeholders = ",".join("?" * len(asset_ids))
+        return placeholders, [str(a) for a in asset_ids]
+
+    def identities(self, asset_ids: list[UUID]) -> dict[UUID, IdentityFacet]:
+        if not asset_ids:
+            return {}
+        placeholders, params = self._in_clause(asset_ids)
+        rows = self.conn.execute(
+            f"SELECT * FROM facet_identity WHERE asset_id IN ({placeholders})", params).fetchall()
+        return {UUID(r["asset_id"]): IdentityFacet(
+            asset_id=UUID(r["asset_id"]), display_name=r["display_name"], taxonomy=r["taxonomy"],
+            status=r["status"], tags=json.loads(r["tags"]), attributes=json.loads(r["attributes"]),
+        ) for r in rows}
+
+    def latest_sources(self, asset_ids: list[UUID]) -> dict[UUID, SourceVersion]:
+        if not asset_ids:
+            return {}
+        placeholders, params = self._in_clause(asset_ids)
+        rows = self.conn.execute(
+            f"SELECT * FROM facet_source_version WHERE is_latest=1 AND asset_id IN ({placeholders})",
+            params).fetchall()
+        return {UUID(r["asset_id"]): SourceVersion(
+            asset_id=UUID(r["asset_id"]), location_uri=r["location_uri"], tool=r["tool"],
+            revision=r["revision"], version_num=r["version_num"], is_latest=bool(r["is_latest"]),
+            published_by=r["published_by"], published_at=_parse_dt(r["published_at"]),
+        ) for r in rows}
+
+    def latest_runtimes(self, asset_ids: list[UUID]) -> dict[UUID, RuntimeVersion]:
+        if not asset_ids:
+            return {}
+        placeholders, params = self._in_clause(asset_ids)
+        rows = self.conn.execute(
+            f"SELECT * FROM facet_runtime_version WHERE is_latest=1 AND asset_id IN ({placeholders})",
+            params).fetchall()
+        return {UUID(r["asset_id"]): RuntimeVersion(
+            asset_id=UUID(r["asset_id"]), location_uri=r["location_uri"], build_id=r["build_id"],
+            version_num=r["version_num"], is_latest=bool(r["is_latest"]), cooked_at=_parse_dt(r["cooked_at"]),
+        ) for r in rows}
 
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
         row = self.conn.execute(
@@ -147,19 +193,31 @@ class SqliteRepo:
                 (Lifecycle(lifecycle).value, str(asset_id)),
             )
 
+    @staticmethod
+    def _as_version_conflict(exc: sqlite3.IntegrityError) -> None:
+        # a UNIQUE(asset_id, version_num) or one_latest_* violation means another
+        # writer advanced the version concurrently -> retryable VersionConflict.
+        # FK / other integrity errors are real bugs; re-raise them untouched.
+        if "unique" in str(exc).lower():
+            raise VersionConflict(str(exc)) from exc
+        raise exc
+
     # --- source facet ---
     def add_source_version(self, v: SourceVersion) -> None:
-        with self.conn:   # demote + insert atomically -> one_latest_source holds
-            self.conn.execute(
-                "UPDATE facet_source_version SET is_latest=0 WHERE asset_id=? AND is_latest=1",
-                (str(v.asset_id),))
-            self.conn.execute(
-                "INSERT INTO facet_source_version"
-                " (asset_id, location_uri, tool, revision, version_num, is_latest, published_at, published_by)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (str(v.asset_id), v.location_uri, v.tool, v.revision, v.version_num,
-                 1 if v.is_latest else 0, _dt(v.published_at), v.published_by),
-            )
+        try:
+            with self.conn:   # demote + insert atomically -> one_latest_source holds
+                self.conn.execute(
+                    "UPDATE facet_source_version SET is_latest=0 WHERE asset_id=? AND is_latest=1",
+                    (str(v.asset_id),))
+                self.conn.execute(
+                    "INSERT INTO facet_source_version"
+                    " (asset_id, location_uri, tool, revision, version_num, is_latest, published_at, published_by)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (str(v.asset_id), v.location_uri, v.tool, v.revision, v.version_num,
+                     1 if v.is_latest else 0, _dt(v.published_at), v.published_by),
+                )
+        except sqlite3.IntegrityError as exc:
+            self._as_version_conflict(exc)
 
     def update_source_location(self, asset_id: UUID, new_location_uri: str,
                                new_revision: str | None = None) -> bool:
@@ -190,17 +248,20 @@ class SqliteRepo:
 
     # --- runtime facet ---
     def add_runtime_version(self, v: RuntimeVersion) -> None:
-        with self.conn:
-            self.conn.execute(
-                "UPDATE facet_runtime_version SET is_latest=0 WHERE asset_id=? AND is_latest=1",
-                (str(v.asset_id),))
-            self.conn.execute(
-                "INSERT INTO facet_runtime_version"
-                " (asset_id, location_uri, build_id, version_num, is_latest, cooked_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (str(v.asset_id), v.location_uri, v.build_id, v.version_num,
-                 1 if v.is_latest else 0, _dt(v.cooked_at)),
-            )
+        try:
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE facet_runtime_version SET is_latest=0 WHERE asset_id=? AND is_latest=1",
+                    (str(v.asset_id),))
+                self.conn.execute(
+                    "INSERT INTO facet_runtime_version"
+                    " (asset_id, location_uri, build_id, version_num, is_latest, cooked_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (str(v.asset_id), v.location_uri, v.build_id, v.version_num,
+                     1 if v.is_latest else 0, _dt(v.cooked_at)),
+                )
+        except sqlite3.IntegrityError as exc:
+            self._as_version_conflict(exc)
 
     def update_runtime_location(self, asset_id: UUID, new_location_uri: str) -> bool:
         with self.conn:

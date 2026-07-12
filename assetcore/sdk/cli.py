@@ -40,6 +40,19 @@ def _csv(s):
     return [t.strip() for t in s.split(",") if t.strip()] if s else None
 
 
+def _parse_attrs(pairs):
+    """Parse repeated --attr KEY=VALUE into a dict (None when none given)."""
+    if not pairs:
+        return None
+    out = {}
+    for p in pairs:
+        if "=" not in p:
+            raise ValueError(f"--attr must be KEY=VALUE, got {p!r}")
+        key, value = p.split("=", 1)
+        out[key.strip()] = value
+    return out
+
+
 def _node_line(n: dict) -> str:
     return f"  [{n['depth']}] {n['rel_type']:<12} {n['asset_id']}"
 
@@ -74,10 +87,15 @@ def build_parser() -> argparse.ArgumentParser:
     g = add("declare", help="mint a provisional asset")
     g.add_argument("--type", required=True, dest="asset_type")
     g.add_argument("--by", required=True, dest="created_by")
+    g.add_argument("--origin", default=None, help="birth context as a JSON object")
 
     g = add("claim", help="give a provisional asset identity (production)")
     g.add_argument("asset_id"); g.add_argument("--name", required=True)
     g.add_argument("--taxonomy", required=True); g.add_argument("--actor", required=True)
+    g.add_argument("--attr", action="append", default=None, metavar="KEY=VALUE",
+                   help="identity attribute (repeatable); authoritative set")
+    g.add_argument("--reactivate", action="store_true",
+                   help="also resurrect the asset if it was deprecated")
 
     g = add("rename", help="relabel the identity facet only (production)")
     g.add_argument("asset_id"); g.add_argument("--name", required=True)
@@ -112,6 +130,10 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("asset_id")
         g.add_argument("--rel-types", default=None, dest="rel_types")
         g.add_argument("--depth", type=int, default=None)
+
+    g = add("history", help="a facet's full version history (ascending)")
+    g.add_argument("asset_id")
+    g.add_argument("--facet", choices=["source", "runtime"], default="source")
 
     add("used-by", help="direct consumers (one hop)").add_argument("asset_id")
     add("lineage", help="what this derives from / instances").add_argument("asset_id")
@@ -163,10 +185,13 @@ def run(args, client: AssetcoreClient) -> int:
         _out(args, r, f"{args.asset_id}\n  identity : {ident_line}\n"
                       f"  source   : {src_line}\n  runtime  : {rt_line}")
     elif cmd == "declare":
-        aid = client.declare(args.asset_type, args.created_by)
+        origin = _json.loads(args.origin) if getattr(args, "origin", None) else None
+        aid = client.declare(args.asset_type, args.created_by, origin=origin)
         _out(args, {"id": aid}, aid)
     elif cmd == "claim":
-        client.claim(args.asset_id, args.name, args.taxonomy, args.actor)
+        attributes = _parse_attrs(getattr(args, "attr", None))
+        client.claim(args.asset_id, args.name, args.taxonomy, args.actor,
+                     attributes=attributes, reactivate=getattr(args, "reactivate", False))
         _out(args, {"ok": True}, f"claimed {args.asset_id} as {args.name!r}")
     elif cmd == "rename":
         client.rename(args.asset_id, args.name, args.actor, args.taxonomy)
@@ -195,6 +220,16 @@ def run(args, client: AssetcoreClient) -> int:
         rel = _csv(args.rel_types)
         nodes = client.dependencies(args.asset_id, rel, args.depth)
         _out(args, nodes, f"{len(nodes)} dependencies:\n" + "\n".join(_node_line(n) for n in nodes))
+    elif cmd == "history":
+        if args.facet == "runtime":
+            versions = client.runtime_versions(args.asset_id)
+            lines = [f"  v{v['version_num']:<3} {v['location_uri']} (build {v['build_id']})"
+                     f"{'  <-latest' if v['is_latest'] else ''}" for v in versions]
+        else:
+            versions = client.source_versions(args.asset_id)
+            lines = [f"  v{v['version_num']:<3} {v['tool']} {v['location_uri']} (rev {v['revision']})"
+                     f"{'  <-latest' if v['is_latest'] else ''}" for v in versions]
+        _out(args, versions, f"{len(versions)} {args.facet} version(s):\n" + "\n".join(lines))
     elif cmd == "used-by":
         rels = client.used_by(args.asset_id)
         _out(args, rels, "\n".join(_rel_line(r) for r in rels) or "  (none)")
@@ -272,8 +307,7 @@ def run(args, client: AssetcoreClient) -> int:
 def main(argv=None) -> int:
     effective = sys.argv[1:] if argv is None else argv
     if effective and effective[0] == "hub":
-        import importlib
-        hub_main = importlib.import_module("assetcore.integrations.hub_bridge").main
+        from assetcore.sdk.hub_cli import main as hub_main   # L3 -> L3, no importlib indirection
         return hub_main(effective)
     args = build_parser().parse_args(argv)
     url = getattr(args, "url", DEFAULT_URL)

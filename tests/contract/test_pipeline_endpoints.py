@@ -30,6 +30,51 @@ def test_dependents_bad_rel_type_is_400(make_client):
     assert exc.value.response.status_code == 400
 
 
+def test_source_and_runtime_version_history(make_client):
+    artist = make_client("artist-token")
+    engine = make_client("engine-token")
+    a = artist.declare("prop", "amy")
+    artist.bind_source(a, "//d/a_v1.ma", "maya", "1", "amy")
+    artist.bind_source(a, "//d/a_v2.ma", "maya", "2", "amy")
+    engine.bind_runtime(a, "/Game/a", "build-1")
+
+    src = artist.source_versions(a)
+    assert [v["version_num"] for v in src] == [1, 2]              # ascending history
+    assert [v["is_latest"] for v in src] == [False, True]        # one latest, the newest
+    assert src[0]["location_uri"] == "//d/a_v1.ma"
+
+    rt = artist.runtime_versions(a)
+    assert [v["version_num"] for v in rt] == [1] and rt[0]["is_latest"] is True
+
+
+def test_version_history_unknown_asset_is_404(make_client):
+    import httpx
+    c = make_client("artist-token")
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        c.source_versions("00000000-0000-0000-0000-000000000000")
+    assert exc.value.response.status_code == 404
+
+
+def test_relate_pin_without_version_is_400(make_client):
+    c = make_client("artist-token")
+    a = c.declare("anim", "amy")
+    b = c.declare("material", "amy")
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        c.relate(a, b, "DEPENDS_ON", binding_mode="pin")   # missing pinned_version
+    assert exc.value.response.status_code == 400
+    assert "pinned_version" in exc.value.response.text
+
+
+def test_set_binding_pin_without_version_is_400(make_client):
+    c = make_client("artist-token")
+    a = c.declare("anim", "amy")
+    b = c.declare("material", "amy")
+    c.relate(a, b, "DEPENDS_ON", binding_mode="float")
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        c.set_binding(a, b, "pin")                          # missing pinned_version
+    assert exc.value.response.status_code == 400
+
+
 def test_relocate_over_http(make_client):
     artist, prod = make_client("artist-token"), make_client("prod-token")
     a = artist.declare("prop", "amy")
@@ -50,6 +95,35 @@ def test_deprecate_over_http(make_client):
     prod.claim(a, "Old", "props/x", "pat")
     prod.deprecate(a, "pat")
     assert prod.resolve(a)["meta"]["lifecycle"] == "deprecated"
+
+
+def test_claim_attribute_named_reactivate_does_not_collide(make_client):
+    # regression: attributes were splatted as kwargs, so an attribute key colliding
+    # with the `reactivate` parameter raised TypeError -> 500. Now attributes is a
+    # plain dict, so any key is safe.
+    artist, prod = make_client("artist-token"), make_client("prod-token")
+    a = artist.declare("prop", "amy")
+    prod.claim(a, "Barrel", "props/barrel", "pat",
+               attributes={"reactivate": "not-a-flag", "actor": "also-fine"})
+    ident = artist.resolve(a)["identity"]
+    assert ident["attributes"] == {"reactivate": "not-a-flag", "actor": "also-fine"}
+    assert ident["display_name"] == "Barrel"
+
+
+def test_claim_deprecated_is_409_without_reactivate(make_client):
+    import httpx
+    artist, prod = make_client("artist-token"), make_client("prod-token")
+    a = artist.declare("prop", "amy")
+    prod.claim(a, "Old", "props/x", "pat")
+    prod.deprecate(a, "pat")
+
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        prod.claim(a, "Reborn", "props/x", "pat")           # no reactivate
+    assert exc.value.response.status_code == 409
+    assert prod.resolve(a)["meta"]["lifecycle"] == "deprecated"   # unchanged
+
+    prod.claim(a, "Reborn", "props/x", "pat", reactivate=True)    # explicit
+    assert prod.resolve(a)["meta"]["lifecycle"] == "active"
 
 
 def test_stale_derivations_over_http(make_client):

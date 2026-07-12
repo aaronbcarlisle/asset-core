@@ -57,3 +57,37 @@ def test_scenario_on_backend(scenario, make_backend):
         close = getattr(repo, "close", None)
         if close is not None:
             close()
+
+
+@pytest.mark.parametrize("make_backend", BACKENDS)
+def test_batch_getters_and_created_by_filter(make_backend):
+    from assetcore.app import verbs
+    repo, sink = make_backend()
+    try:
+        a = verbs.declare(repo, sink, "prop", "amy")
+        b = verbs.declare(repo, sink, "prop", "ben")
+        verbs.claim(repo, sink, a, "Barrel", "props/barrel", "pat")
+        verbs.bind_source(repo, sink, a, "//d/a.ma", "maya", "1", "amy")
+        verbs.bind_runtime(repo, sink, a, "/Game/a", "build-1")
+
+        # created_by pushed down to the repo
+        assert {x.id for x in repo.list_assets(created_by="amy")} == {a}
+
+        ids = [a, b]
+        idents = repo.identities(ids)
+        assert idents[a].display_name == "Barrel"
+        assert idents[b].display_name is None            # provisional, unclaimed
+
+        sources = repo.latest_sources(ids)
+        assert set(sources) == {a} and sources[a].location_uri == "//d/a.ma"
+        runtimes = repo.latest_runtimes(ids)
+        assert set(runtimes) == {a} and runtimes[a].location_uri == "/Game/a"
+
+        # empty input -> empty maps (no malformed IN () query)
+        assert repo.identities([]) == {}
+        assert repo.latest_sources([]) == {}
+        assert repo.latest_runtimes([]) == {}
+    finally:
+        close = getattr(repo, "close", None)
+        if close is not None:
+            close()

@@ -69,8 +69,8 @@ end to end.
 ## Why this respects the architecture
 
 - Lives in `sdk/` (L3) + `integrations/` (L4) + a leaf `infra/_providers.py`;
-  `core`/`app`/`service` business logic untouched. `lint-imports` stays 3 kept / 0
-  broken (the registry is a leaf the layers contract allows infra to import).
+  `core`/`app`/`service` business logic untouched. `lint-imports` stays green (the
+  registry is a leaf the layers contract allows infra to import).
 - Config holds connection details + a provider NAME only — never identity, never
   paths into the pipeline. A tracker is still a view: it cannot path-drive.
 - `${ENV}` expansion keeps secrets out of the file (resolved at load from `os.environ`).

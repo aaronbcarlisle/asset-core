@@ -1,0 +1,95 @@
+name: Test
+
+# The real build gate the docs promise: the test suite, the dependency firewall
+# (import-linter), and config validation run on every PR and push. A PR that
+# breaks a layer boundary (`import maya` inside core/) or a test fails CI
+# mechanically — the thesis is enforced here, not just described in ARCHITECTURE.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The always-on gate: suite + firewall + config validation across Python
+  # versions, no external services (sqlite/in-memory only — the zero-setup path).
+  # ---------------------------------------------------------------------------
+  suite:
+    name: Suite + firewall (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install the package + dev toolchain
+        run: pip install -e ".[dev]"
+
+      - name: Run the test suite
+        run: python -m pytest tests/ -q
+
+      - name: Dependency firewall (import-linter)
+        run: lint-imports
+
+      - name: Validate the example config
+        # dummy secrets: validation proves the config's STRUCTURE (provider names,
+        # required keys, ${ENV} refs resolve), not that real credentials work.
+        env:
+          SHOTGRID_API_KEY: ci-dummy-key
+          JIRA_API_TOKEN: ci-dummy-token
+        run: python scripts/validate_config.py assetcore.toml
+
+  # ---------------------------------------------------------------------------
+  # The Postgres gate: the same suite with a live server, so the postgres_repo,
+  # notify_sink, and cross-backend scenario tests (skipped everywhere else)
+  # actually execute. ASSETCORE_TEST_DSN is what those tests key off.
+  # ---------------------------------------------------------------------------
+  postgres:
+    name: Suite on Postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: assetcore
+          POSTGRES_PASSWORD: assetcore
+          POSTGRES_DB: assetcore
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U assetcore"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      ASSETCORE_TEST_DSN: postgresql://assetcore:assetcore@localhost:5432/assetcore
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install the package + dev toolchain + psycopg2
+        run: pip install -e ".[dev,postgres]"
+
+      - name: Run the test suite (Postgres-backed tests included)
+        run: python -m pytest tests/ -q

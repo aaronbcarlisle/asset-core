@@ -28,10 +28,27 @@ def _format(seq: int, event: Event) -> str:
     return f"id: {seq}\nevent: {event.event_type}\ndata: {json.dumps(data)}\n\n"
 
 
+def _gap_frame(after_seq: int, dropped_seq: int) -> str:
+    """A synthetic SSE frame telling a resuming client it fell behind the in-memory
+    log horizon: events between its cursor and what we still retain were evicted, so
+    it should re-sync from full state rather than trust an incremental follow."""
+    import json
+    data = {"event_type": "stream.gap", "after_seq": after_seq, "dropped_through": dropped_seq,
+            "detail": "requested cursor is behind the retained event log; re-sync from full state"}
+    return f"event: gap\ndata: {json.dumps(data)}\n\n"
+
+
 async def event_source(sink: BroadcastSink, request, after_seq: int = 0):
-    """Async generator yielding SSE frames: catch-up replay, then live follow."""
+    """Async generator yielding SSE frames: catch-up replay, then live follow.
+
+    If the requested `after_seq` is behind the bounded log's horizon, a `gap` frame
+    is sent first (the missed events are gone from memory), then whatever is still
+    retained is replayed and live follow continues.
+    """
     queue = sink.subscribe()                     # subscribe first, so nothing is missed
     try:
+        if sink.has_gap(after_seq):
+            yield _gap_frame(after_seq, sink.dropped_seq)
         replayed = sink.history(after_seq)
         last = replayed[-1][0] if replayed else after_seq
         for seq, event in replayed:

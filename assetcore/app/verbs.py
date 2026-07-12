@@ -18,8 +18,14 @@ from assetcore.core.entities import (
     RuntimeVersion,
     SourceVersion,
 )
+from assetcore.core.errors import VersionConflict
 from assetcore.core.ports import AssetRepo, EventSink
 from assetcore.core.types import BindingMode, Lifecycle, RelType
+
+# bind_source/bind_runtime compute version = max+1 then insert; if a concurrent
+# publisher took that number the repo raises VersionConflict. Re-read and retry a
+# few times before giving up (bounded, so a genuinely stuck write still surfaces).
+_VERSION_WRITE_ATTEMPTS = 5
 
 
 # ---------------------------------------------------------------------------
@@ -47,23 +53,36 @@ def declare(repo: AssetRepo, sink: EventSink, asset_type: str, created_by: str,
 # CLAIM — Production gives a provisional asset meaning (the backfill step).
 # ---------------------------------------------------------------------------
 def claim(repo: AssetRepo, sink: EventSink, asset_id: UUID, display_name: str,
-          taxonomy: str, actor: str, **attrs) -> None:
+          taxonomy: str, actor: str, *, reactivate: bool = False,
+          attributes: dict | None = None) -> None:
     """Production gives a provisional asset meaning — the backfill step.
 
     Sets the identity facet's display name + taxonomy and flips lifecycle to
-    ACTIVE. ``**attrs`` is an authoritative set of identity attributes (a claim
-    with none clears them). Raises ``ValueError`` if the asset is unknown. Emits
-    an ``identity.claimed`` event.
+    ACTIVE. ``attributes`` is an authoritative set of identity attributes (a claim
+    with none clears them) — a plain dict, NOT splatted kwargs, so an attribute
+    named e.g. ``reactivate`` can't collide with a parameter. Raises ``ValueError``
+    if the asset is unknown.
+
+    Claiming a DEPRECATED asset resurrects it — a real state change that must be
+    deliberate, so it is refused unless ``reactivate=True`` is passed (otherwise a
+    routine backfill could silently un-retire something). When it does reactivate,
+    the emitted ``identity.claimed`` event carries ``reactivated: true`` for audit.
     """
     identity = repo.get_identity(asset_id)
     if identity is None:
         raise ValueError(f"cannot claim unknown asset {asset_id}")
+    asset = repo.get_asset(asset_id)
+    was_deprecated = asset is not None and asset.lifecycle == Lifecycle.DEPRECATED
+    if was_deprecated and not reactivate:
+        raise ValueError(
+            f"asset {asset_id} is deprecated; pass reactivate=True to resurrect it")
     identity.display_name = display_name
     identity.taxonomy = taxonomy
-    identity.attributes = dict(attrs)   # authoritative set: a claim with no attrs clears them
+    identity.attributes = dict(attributes or {})   # authoritative set: none -> cleared
     repo.save_identity(identity)
     repo.set_lifecycle(asset_id, Lifecycle.ACTIVE)
-    sink.emit(Event(asset_id, "identity.claimed", {"name": display_name}, actor))
+    sink.emit(Event(asset_id, "identity.claimed",
+                    {"name": display_name, "reactivated": was_deprecated}, actor))
 
 
 # ---------------------------------------------------------------------------
@@ -100,13 +119,20 @@ def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: 
     demoted as part of the same write (the ``one_latest_source`` invariant). Emits
     a ``source.published`` event.
     """
-    v = rules.next_version_num(repo.source_versions(asset_id))
     # The repo demotes the prior latest as part of the write (the schema's
-    # one_latest_source unique index forces demote-then-insert atomically).
-    repo.add_source_version(SourceVersion(
-        asset_id=asset_id, location_uri=location_uri, tool=tool,
-        revision=str(revision), version_num=v, is_latest=True, published_by=published_by,
-    ))
+    # one_latest_source unique index forces demote-then-insert atomically). On a
+    # concurrent-version race the repo raises VersionConflict; re-read + retry.
+    for attempt in range(_VERSION_WRITE_ATTEMPTS):
+        v = rules.next_version_num(repo.source_versions(asset_id))
+        try:
+            repo.add_source_version(SourceVersion(
+                asset_id=asset_id, location_uri=location_uri, tool=tool,
+                revision=str(revision), version_num=v, is_latest=True, published_by=published_by,
+            ))
+            break
+        except VersionConflict:
+            if attempt == _VERSION_WRITE_ATTEMPTS - 1:
+                raise
     sink.emit(Event(asset_id, "source.published",
                     {"location_uri": location_uri, "version": v, "tool": tool}, published_by))
     return v
@@ -116,21 +142,29 @@ def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: 
 # BIND_RUNTIME — the build/engine reports where the cooked asset lives.
 # ---------------------------------------------------------------------------
 def bind_runtime(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: str,
-                 build_id: str) -> int:
+                 build_id: str, actor: str = "build") -> int:
     """The build/engine reports where the cooked asset lives — write RUNTIME.
 
     Adds a new runtime version and returns its version number; the prior latest is
     demoted at write time (the ``one_latest_runtime`` invariant). Emits a
-    ``runtime.cooked`` event.
+    ``runtime.cooked`` event attributed to ``actor`` (the caller's authority, not a
+    hardcoded label).
     """
-    v = rules.next_version_num(repo.runtime_versions(asset_id))
-    # one_latest_runtime invariant is enforced at write time by the repo.
-    repo.add_runtime_version(RuntimeVersion(
-        asset_id=asset_id, location_uri=location_uri, build_id=build_id,
-        version_num=v, is_latest=True,
-    ))
+    # one_latest_runtime invariant is enforced at write time by the repo; a
+    # concurrent-version race raises VersionConflict -> re-read + retry (bounded).
+    for attempt in range(_VERSION_WRITE_ATTEMPTS):
+        v = rules.next_version_num(repo.runtime_versions(asset_id))
+        try:
+            repo.add_runtime_version(RuntimeVersion(
+                asset_id=asset_id, location_uri=location_uri, build_id=build_id,
+                version_num=v, is_latest=True,
+            ))
+            break
+        except VersionConflict:
+            if attempt == _VERSION_WRITE_ATTEMPTS - 1:
+                raise
     sink.emit(Event(asset_id, "runtime.cooked",
-                    {"location_uri": location_uri, "version": v}, "build"))
+                    {"location_uri": location_uri, "version": v}, actor))
     return v
 
 
@@ -142,12 +176,14 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
            pinned_version: int | None = None) -> None:
     """Assert a NEW typed edge ``frm -> to``.
 
-    ``binding_mode``/``pinned_version`` are valid only on DEPENDS_ON. For
-    DERIVED_FROM the edge records the parent's current source version, so
-    `stale_derivations` can flag it once the parent advances. The edge is
-    validated (self-edges and a binding_mode on a non-DEPENDS_ON edge raise
-    ``ValueError``). Emits a ``relationship.added`` event. Flipping an existing
-    edge float↔pin is `set_binding`, not this.
+    ``binding_mode``/``pinned_version`` are valid only on DEPENDS_ON. A ``pin``
+    binding must carry a ``pinned_version`` (a pin with none resolves to nothing);
+    a ``pinned_version`` is valid only with ``pin``. For DERIVED_FROM the edge
+    records the parent's current source version, so `stale_derivations` can flag it
+    once the parent advances. The edge is validated (self-edges, a binding_mode on
+    a non-DEPENDS_ON edge, and an inconsistent pin/version raise ``ValueError``).
+    Emits a ``relationship.added`` event. Flipping an existing edge float↔pin is
+    `set_binding`, not this.
 
     Hub/offline replay safety is enforced here by duplicate-edge detection:
     re-applying the same edge raises ``ValueError`` with ``duplicate edge: ...``.
@@ -180,12 +216,15 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
 # SET_BINDING — flip an existing DEPENDS_ON edge float<->pin (consumer's call).
 # ---------------------------------------------------------------------------
 def set_binding(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID,
-                binding_mode: BindingMode, pinned_version: int | None = None) -> None:
+                binding_mode: BindingMode, pinned_version: int | None = None,
+                actor: str = "consumer") -> None:
     """Flip an EXISTING DEPENDS_ON edge between float and pin (the consumer's call).
 
     ``float`` always resolves to the latest authored version; ``pin`` locks to a
-    specific one. Raises ``ValueError`` if there's no such edge (use `relate`
-    to create one). Emits a ``binding.changed`` event.
+    specific one and therefore requires a ``pinned_version`` (a pin with none
+    raises ``ValueError`` — it would resolve to nothing). Raises ``ValueError`` if
+    there's no such edge (use `relate` to create one). Emits a ``binding.changed``
+    event.
     """
     binding_mode = BindingMode(binding_mode)
     edge = repo.get_edge(frm, to, RelType.DEPENDS_ON)
@@ -198,7 +237,7 @@ def set_binding(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID,
     repo.upsert_relationship(r)
     sink.emit(Event(frm, "binding.changed",
                     {"to": str(to), "binding_mode": binding_mode.value,
-                     "pinned_version": pinned_version}, "consumer"))
+                     "pinned_version": pinned_version}, actor))
 
 
 # ---------------------------------------------------------------------------
@@ -283,11 +322,17 @@ def find_similar(repo: AssetRepo, name: str, asset_type: str | None = None,
 # ---------------------------------------------------------------------------
 # BACKFILL_WORKLIST — the provisional queue Production grooms (oldest first).
 # ---------------------------------------------------------------------------
-def backfill_worklist(repo: AssetRepo) -> list[tuple]:
-    """Provisional assets awaiting a claim, with their birth context. (asset, identity)."""
+def backfill_worklist(repo: AssetRepo, limit: int | None = None, offset: int = 0) -> list[tuple]:
+    """Provisional assets awaiting a claim, with their birth context. (asset, identity).
+
+    Oldest first (groom the tail). `limit`/`offset` page the queue; identities are
+    batch-fetched for the returned page (no per-asset N+1).
+    """
     provisional = repo.list_assets(lifecycle=Lifecycle.PROVISIONAL)
-    provisional.sort(key=lambda a: a.created_at)          # oldest first: groom the tail
-    return [(a, repo.get_identity(a.id)) for a in provisional]
+    provisional.sort(key=lambda a: (a.created_at, str(a.id)))   # oldest first, stable
+    page = provisional[offset:] if limit is None else provisional[offset:offset + limit]
+    idents = repo.identities([a.id for a in page])
+    return [(a, idents.get(a.id)) for a in page]
 
 
 # ---------------------------------------------------------------------------
@@ -364,7 +409,8 @@ def relocate(repo: AssetRepo, sink: EventSink, asset_id: UUID, new_location_uri:
 def deprecate(repo: AssetRepo, sink: EventSink, asset_id: UUID, actor: str) -> None:
     """Mark an identity DEPRECATED. Reversible (it's a lifecycle flag, not a delete)
     and never strips facets or edges — `dependents` still finds who's on it, so a
-    retire is safe and auditable.
+    retire is safe and auditable. To bring it back, `claim(..., reactivate=True)`
+    (a plain claim refuses, so a routine backfill can't silently un-retire it).
     """
     if repo.get_asset(asset_id) is None:
         raise ValueError(f"cannot deprecate unknown asset {asset_id}")

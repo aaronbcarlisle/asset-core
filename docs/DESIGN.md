@@ -86,7 +86,7 @@ The naming war becomes *structurally impossible*, not merely discouraged.
 
 ---
 
-## 2. The data model (see `assetcore/db/schema.sql`)
+## 2. The data model (see `assetcore/infra/schema.sql` + `assetcore/core/entities.py`)
 
 Five tables. The shape IS the philosophy.
 
@@ -124,7 +124,7 @@ disappears. This single column is the entire fix for Scenario 3.
 
 ---
 
-## 3. The API surface (see `assetcore/api.py`)
+## 3. The API surface (see `assetcore/app/verbs.py`)
 
 **The API is the only door.** No tool touches Perforce/engine paths directly to
 establish identity. The moment something reads a path off disk to identify an asset,
@@ -144,7 +144,7 @@ all guarantees evaporate. Everything traffics in UUIDs.
 
 ---
 
-## 4. The three scenarios, solved (see `tests/test_scenarios.py`)
+## 4. The three scenarios, solved (see `tests/unit/test_scenarios.py`)
 
 These are the author's real production pain points. Each resolves through the same
 four verbs with **zero special-casing**.

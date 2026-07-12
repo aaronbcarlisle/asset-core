@@ -1,6 +1,12 @@
 # tests/integrations/test_hub_bridge.py
 import json
-from assetcore.integrations.hub_bridge import main
+from assetcore.sdk.hub_cli import main
+
+
+def test_deprecated_shim_reexports_main():
+    # the old L4 path still works for one release (re-exports the L3 entry point)
+    from assetcore.integrations.hub_bridge import main as shim_main
+    assert shim_main is main
 
 TOML = """
 [hub]

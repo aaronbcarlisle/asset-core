@@ -10,9 +10,12 @@ token map, overridable via the ASSETCORE_TOKENS env var (JSON: token->authority)
 Real RBAC / signed identities are Phase 8 hardening. No business rule lives here.
 """
 import json
+import logging
 import os
 
 from fastapi import Depends, Header, HTTPException, Request
+
+logger = logging.getLogger(__name__)
 
 # Authorities (kept as plain strings; they're an L2 access concept, not a domain enum)
 PRODUCTION = "production"
@@ -28,11 +31,30 @@ DEFAULT_TOKENS: dict[str, str] = {
 }
 
 
+def _truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in ("1", "true", "yes", "on")
+
+
 def load_tokens() -> dict[str, str]:
-    """Token->authority map. ASSETCORE_TOKENS (JSON) overrides the dev defaults."""
+    """Token->authority map. ASSETCORE_TOKENS (JSON) overrides the dev defaults.
+
+    The built-in defaults are WELL-KNOWN dev tokens — fine locally, dangerous
+    exposed. If ASSETCORE_TOKENS is unset we warn loudly; set
+    ASSETCORE_REQUIRE_TOKENS=1 to fail startup instead of falling back to them
+    (the production-safe posture).
+    """
     raw = os.environ.get("ASSETCORE_TOKENS")
     if raw:
         return json.loads(raw)
+    if _truthy(os.environ.get("ASSETCORE_REQUIRE_TOKENS")):
+        raise RuntimeError(
+            "ASSETCORE_REQUIRE_TOKENS is set but ASSETCORE_TOKENS is not; refusing to "
+            "start with the built-in dev tokens. Provide a token->authority JSON map "
+            "in ASSETCORE_TOKENS.")
+    logger.warning(
+        "no ASSETCORE_TOKENS set — using built-in DEV tokens (prod-token, artist-token, "
+        "engine-token, build-token). Do NOT expose this service; set ASSETCORE_TOKENS, or "
+        "ASSETCORE_REQUIRE_TOKENS=1 to fail closed.")
     return dict(DEFAULT_TOKENS)
 
 

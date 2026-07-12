@@ -29,9 +29,9 @@ python demo.py            # narrated walkthrough of the 3 real scenarios
 python -m pytest tests/   # regression suite
 ```
 
-Everything runs on in-memory SQLite out of the box — no database to install.
-Postgres is the production target (`assetcore/db/schema.sql` is Postgres dialect;
-the SQLite backend translates it on the fly).
+`demo.py` runs the layered stack in-memory — no database to install. Postgres is
+the production target (`assetcore/infra/schema.sql` is Postgres dialect; the SQLite
+backend translates it on the fly).
 
 ## What it solves (the three scenarios in `tests/`)
 
@@ -62,9 +62,10 @@ The API is the only door — everything traffics in UUIDs, never paths.
 ```
 assetcore/        the layered framework — core / app / infra / service / sdk / integrations
 docs/             the documents (start: docs/README.md → DESIGN → ARCHITECTURE → DEVELOPMENT → COOKBOOK)
-tests/            unit / contract / integration suites + the protected prototype scenarios
+examples/         prototype/ — the frozen single-file seed (reference only)
+tests/            unit / contract / integration / sdk suites
 scripts/          operational drivers (live_* drive real tools; demo_* are narrated)
-demo.py           narrated end-to-end run
+demo.py           narrated end-to-end run (layered stack, in-memory)
 CLAUDE.md         context for continuing with Claude Code
 ```
 
@@ -84,7 +85,7 @@ companion `ugs-dev` repo (`docs/superpowers/specs/2026-07-11-ugs-assetcore-hub-d
 | Local replica | `%LOCALAPPDATA%/StudioUGS/cache/assetcore.db` — hydrated on UGS sync |
 | Local reader | `assetcore hub serve-local` on `127.0.0.1:8741` (identity `/health`) |
 | Outbox | `%LOCALAPPDATA%/StudioUGS/cache/outbox.db` — WAL sqlite queue when central is down |
-| `HybridClient` | Reads: local reader first, central fallback. Writes: central if up, else outbox + optimistic replica patch |
+| `HybridClient` | Reads: local reader first, central fallback (same response shape either way). Writes: central if up, else outbox + optimistic replica patch |
 
 Launch and UE editor start **never** require central. See spec §5.4 availability matrix.
 

@@ -108,6 +108,58 @@ def test_declare_requires_a_token(client):
     assert r.status_code == 401
 
 
+def test_response_carries_request_id(client):
+    # minted when absent...
+    r = client.get("/health")
+    assert r.headers.get("X-Request-ID")
+    # ...and echoed when the caller supplies one (end-to-end correlation)
+    r2 = client.get("/health", headers={"X-Request-ID": "trace-abc"})
+    assert r2.headers["X-Request-ID"] == "trace-abc"
+
+
+def test_bind_source_version_conflict_returns_503():
+    from fastapi.testclient import TestClient
+    from assetcore.core.errors import VersionConflict
+    from assetcore.infra.broadcast_sink import BroadcastSink
+    from assetcore.infra.sqlite_repo import SqliteRepo
+    from assetcore.service.app import create_app
+
+    class ConflictRepo(SqliteRepo):
+        def add_source_version(self, v):        # always lose the race
+            raise VersionConflict("persistent contention")
+
+    app = create_app(repo=ConflictRepo(":memory:", check_same_thread=False), sink=BroadcastSink())
+    tc = TestClient(app)
+    aid = tc.post("/assets", json={"asset_type": "prop", "created_by": "amy"},
+                  headers={"X-Assetcore-Token": "artist-token"}).json()["id"]
+    r = tc.post(f"/assets/{aid}/source",
+                json={"location_uri": "//d/a.ma", "tool": "maya", "revision": "1",
+                      "published_by": "amy"}, headers={"X-Assetcore-Token": "artist-token"})
+    assert r.status_code == 503                  # retryable, not a generic 500
+    assert r.headers.get("Retry-After") == "1"
+
+
+def test_request_id_present_on_handled_and_unhandled_errors():
+    from fastapi.testclient import TestClient
+    from assetcore.infra.broadcast_sink import BroadcastSink
+    from assetcore.infra.sqlite_repo import SqliteRepo
+    from assetcore.service.app import create_app
+
+    app = create_app(repo=SqliteRepo(":memory:", check_same_thread=False), sink=BroadcastSink())
+
+    @app.get("/_boom")
+    async def _boom():                      # simulate an UNHANDLED error path
+        raise RuntimeError("kaboom")
+
+    tc = TestClient(app, raise_server_exceptions=False)
+    # handled 404 already carried the id; the unhandled 500 must too (+ be a clean body)
+    assert tc.get("/assets/00000000-0000-0000-0000-000000000000").headers.get("X-Request-ID")
+    boom = tc.get("/_boom")
+    assert boom.status_code == 500
+    assert boom.headers.get("X-Request-ID")
+    assert boom.json()["detail"] == "internal server error"
+
+
 def test_claim_requires_production(client):
     aid = _declare(client)
     forbidden = client.post(f"/assets/{aid}/claim",
@@ -242,3 +294,26 @@ def test_event_source_catch_up_skips_already_seen():
         return [frame]
 
     assert _types(asyncio.run(drive())) == ["source.published"]
+
+
+def test_event_source_emits_gap_when_resume_is_behind_horizon():
+    """Resuming from before the bounded log's horizon yields a `gap` frame first,
+    then whatever is still retained — never a silent miss."""
+    sink = BroadcastSink(max_log=3)
+    for _ in range(5):
+        sink.emit(Event(None, "declared"))     # retains seq 3,4,5; drops 1,2
+
+    class _FakeRequest:
+        async def is_disconnected(self) -> bool:
+            return False
+
+    async def drive() -> list[str]:
+        gen = event_source(sink, _FakeRequest(), after_seq=1)   # behind the horizon
+        frames = [await gen.__anext__() for _ in range(4)]      # gap + seq 3,4,5
+        await gen.aclose()
+        return frames
+
+    frames = asyncio.run(drive())
+    assert frames[0].startswith("event: gap")
+    assert "stream.gap" in frames[0]
+    assert _types(frames) == ["declared", "declared", "declared"]   # the 3 retained

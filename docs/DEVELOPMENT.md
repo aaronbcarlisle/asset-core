@@ -137,20 +137,23 @@ assetcore/
     providers.py       the generic capability→provider registry
     settings.py        load/validate assetcore.toml, expand ${ENV}, build providers
   integrations/  L4  disposable translators — maya, max, blender, substance, unreal, photoshop, shotgrid, jira
-  db/            schema.sql (Postgres dialect) + alembic migrations
+  infra/schema.sql   the canonical Postgres-dialect DDL the repos bootstrap from
+  db/            alembic migrations (the managed production schema path)
 
 docs/            the documents (this file lives here)
+examples/        prototype/ — the frozen single-file seed (reference only)
 scripts/         operational drivers — live_* (drive real tools), demo_* (narrated), validate_config, stamp_coverage_gate
-tests/           unit/ · contract/ · integration/ + the protected prototype scenarios
-demo.py          narrated end-to-end run (the seed)
+tests/           unit/ · contract/ · integration/ · sdk/
+demo.py          narrated end-to-end run on the layered stack (in-memory, zero setup)
 ```
 
-### The protected prototype seed
+### The prototype seed (frozen, moved out)
 
-`assetcore/api.py`, `assetcore/db/schema.sql`, `demo.py`, and
-`tests/test_scenarios.py` are the original single-file prototype. They are kept
-**runnable and untouched** as a reference and a regression anchor — do not edit
-them. New work lives in the layered tree above.
+The original single-file prototype (`api.py`, `connection.py`, `schema.sql`, its
+`demo.py`) now lives under **`examples/prototype/`** as frozen reference — it is not
+imported by the `assetcore` package or run by the suite. The layered tree above is
+the product; `examples/prototype/README.md` maps the old files onto it. The
+repo-root `demo.py` is the maintained walkthrough (layered stack, in-memory).
 
 ---
 
@@ -165,6 +168,12 @@ it, each owned by one authority, bound only by the UUID. Nothing is inferred.
 | `IdentityFacet` | Production | `display_name`, `taxonomy`, `status`, `tags`, `attributes` | a **rename touches only this** |
 | `SourceVersion` | Artist/DCC | `location_uri`, `tool`, `revision`, `version_num`, `is_latest` | authored truth; versioned; location is **opaque** |
 | `RuntimeVersion` | engine/build | `location_uri`, `build_id`, `version_num`, `is_latest` | the cooked/imported asset; versioned |
+
+> Version numbers are `max+1` per asset per facet, guarded by
+> `UNIQUE(asset_id, version_num)` + a `one_latest_*` partial unique index. Two
+> publishers racing for the same number get a typed `VersionConflict` from the
+> repo; `bind_source`/`bind_runtime` re-read and retry (bounded), so concurrent
+> publishes land as distinct monotonic versions instead of a 500.
 | `Relationship` | any | `from_asset`, `to_asset`, `rel_type`, `binding_mode`, `pinned_version`, `attributes` | a typed, directed edge |
 | `Event` | — | `asset_id`, `event_type`, `payload`, `actor`, `id` | append-only; every facet write emits one |
 
@@ -200,15 +209,20 @@ lint-imports
 python -c "from importlinter.cli import lint_imports; lint_imports()"
 ```
 
-Three contracts live in `pyproject.toml [tool.importlinter]`:
+Four contracts live in `pyproject.toml [tool.importlinter]`:
 
 1. **Inward-only layering** — `service → infra → app → core`.
 2. **SDK over HTTP** — `assetcore.sdk` may not import `core`/`app`/`infra`/`service`.
 3. **Integrations import only the SDK** — `assetcore.integrations` may not import the inner layers.
+4. **SDK never reaches up to L4** — `assetcore.sdk` may not import `assetcore.integrations`.
 
 A second, zero-dependency backstop runs in the normal suite:
 `tests/contract/test_sdk_firewall.py` AST-scans the source so the firewall is
 checked even without import-linter installed.
+
+All three contracts run on every PR and push in CI (`.github/workflows/test.yml`,
+the `lint-imports` step), so `import maya` inside `core/` fails the build
+mechanically — the firewall is a gate, not a convention.
 
 > If a change makes you want to `import maya` inside `core/`, or read a path off
 > disk to establish identity, **stop** — you've found a leak. The fix is almost
@@ -235,7 +249,7 @@ Layout and intent:
 | `tests/unit/` | the rules and verbs in isolation | call `verbs.*` / `rules.*` against `InMemoryRepo` + `InMemorySink` |
 | `tests/contract/` | the wire contract + that every adapter behaves identically | drive the real `create_app()` stack through a `TestClient` via `AssetcoreClient` |
 | `tests/integration/` | end-to-end workflows on real backends | parametrized across in-memory **and** sqlite (and Postgres when `ASSETCORE_TEST_DSN` is set) |
-| `tests/test_scenarios.py` | the protected prototype still works | leave untouched |
+| `tests/unit/test_scenarios.py` | the 3 scenarios against the layered stack | call `verbs.*` vs `InMemoryRepo` |
 
 The contract suite's shared fixtures (`tests/contract/conftest.py`) give you a
 `service` (a `TestClient` over a fresh sqlite app) and a `make_client(token)`
@@ -246,13 +260,51 @@ erroring.
 **Cross-backend Postgres run** (optional): stand up a throwaway PG, then
 `ASSETCORE_TEST_DSN=postgresql://... python -m pytest tests/integration/`.
 
+### Continuous integration
+
+`.github/workflows/test.yml` is the real build gate:
+
+- **`suite`** — installs `.[dev]` and runs the full suite + `lint-imports` +
+  `python scripts/validate_config.py assetcore.toml` across Python 3.11 / 3.12 /
+  3.13 (sqlite / in-memory only — the zero-setup path).
+- **`postgres`** — spins up a `postgres:16` service container and runs the same
+  suite with `ASSETCORE_TEST_DSN` set, so the Postgres-backed `postgres_repo`,
+  `notify_sink`, and cross-backend scenario tests (skipped everywhere else)
+  actually execute.
+
+(`docs.yml` separately runs `mkdocs build --strict` as a docs gate.)
+
 ### Hub / offline replay
 
 For §7.5.4 replay safety, duplicate relationship replays are rejected at L1 by
 `verbs.relate`: it raises `ValueError("duplicate edge: ...")` when the same typed
-edge already exists. This behavior is independent of `_already_applied` checks,
-which are used for dependency replay helpers and are not the dedupe guard for
-`relate`.
+edge already exists (HTTP **400** over the service). On replay this is *expected*
+after a crash between the central write and the outbox `mark_done`: `replay_outbox`
+recognises a duplicate-edge error (`_is_duplicate_edge_error`) and marks the entry
+**done** rather than failing it and holding the asset's queue — so a half-committed
+relate can't poison the outbox.
+
+Outbox idempotency (`_already_applied`) is **exact-match, never ordered**:
+`revision` is an opaque string (P4 CL, git sha), so an entry is skipped only when
+central's current state equals exactly what the entry would write. A queued write
+against a *different* current revision is dispatched and lands as a new (monotonic,
+auditable) version — never silently dropped. (The earlier `>=` string comparison
+was doubly wrong: `"9" >= "10"` is `True`, and git shas have no order at all.)
+
+**Local reader shapes match central.** The replica stores each asset in the central
+`resolve()` shape (`id/meta/identity/source/runtime`); the local reader's
+`/resolve/{id}` returns exactly that plus an additive `dependencies` key, and
+`/assets` returns `AssetSummaryOut`-shaped records — so a `HybridClient` read gives
+the same shape whether the local reader or central answered it. The
+`taxonomy_prefix` / `updated_since` / `created_by` filters work because `taxonomy`
+and `updated_at` are extracted into real columns (they used to be nested-only, so
+those filters silently returned nothing). `hydrate_cache` builds these records from
+the central `list_assets` summary (for `created_at`) enriched with `resolve` (for
+`runtime`).
+
+> Compatibility note: the Studio UGS C# plugin consumes these local endpoints. The
+> `/resolve` and `/assets` response shapes changed to match central — check the
+> plugin's parsing when rolling this out (see the companion `ugs-dev` spec).
 
 ---
 
@@ -372,7 +424,7 @@ only when asked. Keep the firewall green and the suite passing in every commit.
 | swap storage / tracker | `assetcore.toml` (+ a provider registration if new) |
 | teach the system a new URI scheme | `sdk/resolvers.py` |
 | add a reactive recipe | `sdk/automation.py` consumers (register handlers) |
-| change the data model | `core/entities.py` + `core/types.py` + `db/schema.sql` + a migration |
+| change the data model | `core/entities.py` + `core/types.py` + `infra/schema.sql` + a migration |
 
 For copy-paste usage of every capability above, see **[`COOKBOOK.md`](COOKBOOK.md)**.
 

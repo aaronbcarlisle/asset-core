@@ -43,6 +43,33 @@ def test_declare_with_client_id_is_idempotent_and_sdk_accepts_id(client):
     assert sdk.declare("prop", "artist-a", asset_id=aid) == aid
 
 
+def test_declare_with_mismatched_payload_is_409(client):
+    aid = str(uuid4())
+    first = client.post(
+        "/assets",
+        json={"id": aid, "asset_type": "prop", "created_by": "artist-a"},
+        headers=ARTIST,
+    )
+    assert first.status_code == 201, first.text
+
+    # same id, DIFFERENT asset_type -> genuine collision, not an idempotent retry
+    conflict_type = client.post(
+        "/assets",
+        json={"id": aid, "asset_type": "set", "created_by": "artist-a"},
+        headers=ARTIST,
+    )
+    assert conflict_type.status_code == 409, conflict_type.text
+    assert "already exists" in conflict_type.json()["detail"]
+
+    # same id, DIFFERENT created_by -> also a collision
+    conflict_creator = client.post(
+        "/assets",
+        json={"id": aid, "asset_type": "prop", "created_by": "artist-b"},
+        headers=ARTIST,
+    )
+    assert conflict_creator.status_code == 409, conflict_creator.text
+
+
 def test_list_assets_supports_scope_filters_and_summary_shape(client):
     sdk = AssetcoreClient(token="artist-token", http=client)
 
@@ -85,6 +112,32 @@ def test_list_assets_supports_scope_filters_and_summary_shape(client):
     sample = next(a for a in by_creator if a["id"] == props_aid)
     assert {"id", "asset_type", "created_by", "created_at", "meta", "identity", "source"} <= set(sample)
     assert sample["identity"]["taxonomy"] == "props/new/barrel"
+
+
+def test_list_assets_pagination_is_stable(client):
+    sdk = AssetcoreClient(token="artist-token", http=client)
+    ids = [sdk.declare("prop", "artist-a") for _ in range(5)]
+
+    page1 = sdk.list_assets(limit=2, offset=0)
+    page2 = sdk.list_assets(limit=2, offset=2)
+    page3 = sdk.list_assets(limit=2, offset=4)
+    assert [len(page1), len(page2), len(page3)] == [2, 2, 1]
+
+    # pages are disjoint and together cover every declared asset (stable order)
+    seen = [a["id"] for a in page1 + page2 + page3]
+    assert len(seen) == len(set(seen)) == 5
+    assert set(seen) == set(ids)
+
+
+def test_worklist_pagination(client):
+    sdk = AssetcoreClient(token="artist-token", http=client)
+    for _ in range(4):
+        sdk.declare("prop", "artist-a")           # all provisional (unclaimed)
+    first_two = sdk.backfill_worklist(limit=2, offset=0)
+    next_two = sdk.backfill_worklist(limit=2, offset=2)
+    assert len(first_two) == 2 and len(next_two) == 2
+    ids = {i["id"] for i in first_two} | {i["id"] for i in next_two}
+    assert len(ids) == 4                            # disjoint pages, oldest-first
 
 
 def test_get_source_returns_none_until_source_is_bound(client):

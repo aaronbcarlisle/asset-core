@@ -31,6 +31,34 @@ def test_global_flags_work_after_subcommand(make_client, capsys):
     assert code == 0 and json.loads(out)["id"] == aid
 
 
+def test_declare_origin_and_claim_attrs(make_client, capsys):
+    artist, prod = make_client("artist-token"), make_client("prod-token")
+    aid = json.loads(call(artist, "--json", "declare", "--type", "prop", "--by", "amy",
+                          "--origin", '{"shot": "sq01"}', capsys=capsys)[1])["id"]
+    # origin round-trips
+    assert artist.resolve(aid)["meta"]["asset_type"] == "prop"
+    assert call(prod, "claim", aid, "--name", "Barrel", "--taxonomy", "props/barrel",
+                "--actor", "pat", "--attr", "biome=harbor", "--attr", "reusable=yes",
+                capsys=capsys)[0] == 0
+    ident = artist.resolve(aid)["identity"]
+    assert ident["display_name"] == "Barrel"
+    assert ident["attributes"] == {"biome": "harbor", "reusable": "yes"}
+
+
+def test_history_lists_source_versions(make_client, capsys):
+    artist = make_client("artist-token")
+    aid = artist.declare("prop", "amy")
+    artist.bind_source(aid, "//d/a_v1.ma", "maya", "1", "amy")
+    artist.bind_source(aid, "//d/a_v2.ma", "maya", "2", "amy")
+    code, out = call(artist, "--json", "history", aid, capsys=capsys)
+    assert code == 0
+    versions = json.loads(out)
+    assert [v["version_num"] for v in versions] == [1, 2]
+    # human output marks the latest
+    code, out = call(artist, "history", aid, capsys=capsys)
+    assert code == 0 and "<-latest" in out
+
+
 def test_declare_resolve_relate_impact(make_client, capsys):
     artist = make_client("artist-token")
 

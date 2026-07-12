@@ -13,6 +13,7 @@ from assetcore.sdk.hub import PipelineConfig
 from assetcore.sdk import replica as _replica
 
 _PROBE_TIMEOUT = 2.0
+_LIST_PAGE = 500       # central /assets default page size; used to page the fallback
 
 
 class OutboxEntry(TypedDict):
@@ -105,24 +106,67 @@ def list_failed(conn: sqlite3.Connection) -> list[OutboxEntry]:
 
 
 def _already_applied(client, entry: OutboxEntry) -> bool:
-    """Read central state; True if it already reflects this entry (spec §5.3, §7.5.4)."""
+    """Read central state; True if it already reflects this entry (spec §5.3, §7.5.4).
+
+    Idempotency is EXACT-MATCH, never ordered: revisions are opaque strings (P4 CLs,
+    git shas) with no reliable ordering — the old ``>=`` comparison was doubly wrong
+    (``"9" >= "10"`` is True, and a git sha has no order at all). So an entry counts
+    as already-applied only when central's current state equals exactly what this
+    entry would write. A queued write against a DIFFERENT current revision is NOT
+    skipped — it is dispatched and lands as a new (monotonic, auditable) version
+    rather than being silently dropped.
+    """
     p, verb = entry["payload"], entry["verb"]
     try:
         if verb == "declare":
             aid = p.get("id")
-            return bool(aid and client.resolve(aid) is not None)
+            if not aid:
+                return False
+            existing = client.resolve(aid)
+            if existing is None:
+                return False
+            # match the service's declare-with-id rule: only "already applied" when
+            # the stored asset matches the queued payload. A mismatch is a genuine
+            # collision (central 409s) — don't silently mark it done; let it dispatch
+            # and surface as a failure.
+            meta = existing.get("meta") or {}
+            return (meta.get("asset_type") in (None, p.get("asset_type"))
+                    and meta.get("created_by") in (None, p.get("created_by")))
         if verb == "bind_source":
             cur = client.get_source(p["asset_id"])
             return bool(cur and cur["location_uri"] == p["location_uri"]
-                        and str(cur["revision"]) >= str(p["revision"]))
+                        and str(cur["revision"]) == str(p["revision"]))
         if verb == "relocate":
             cur = client.get_source(p["asset_id"])
-            return bool(cur and cur["location_uri"] == p["new_location_uri"])
-        if verb == "relate":
-            return False
+            return bool(cur and cur["location_uri"] == p["new_location_uri"]
+                        and (p.get("new_revision") is None
+                             or str(cur.get("revision")) == str(p["new_revision"])))
+        # relate/rename/bulk carry no cheaply-checkable "already there" signal;
+        # a re-applied relate that central already has surfaces as a duplicate-edge
+        # error at dispatch, which replay_outbox treats as already-applied.
         return False
     except Exception:
         return False
+
+
+def _is_duplicate_edge_error(exc: Exception) -> bool:
+    """True when a dispatch failed only because the edge already exists on central.
+
+    A relate replayed after it already reached central (e.g. a crash between the
+    central write and mark_done) comes back as HTTP 400/409 whose body names a
+    duplicate edge. That is success-from-our-side, not a failure to hold the queue
+    on — so replay treats it as already-applied instead of poisoning the outbox.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return False
+    try:
+        if response.status_code not in (400, 409):
+            return False
+        body = response.text.lower()
+    except Exception:
+        return False
+    return "duplicate edge" in body or "edge already exists" in body
 
 
 def _dispatch(client, entry: OutboxEntry) -> None:
@@ -162,6 +206,10 @@ def replay_outbox(conn: sqlite3.Connection, client) -> dict:
             mark_done(conn, entry["id"])
             replayed += 1
         except Exception as exc:
+            if _is_duplicate_edge_error(exc):   # already on central (crash-after-write)
+                mark_done(conn, entry["id"])
+                skipped += 1
+                continue
             mark_failed(conn, entry["id"], repr(exc))
             failed += 1
             if aid:
@@ -223,8 +271,18 @@ class HybridClient:
         try:
             return self._local_get("/assets", params=params or None)
         except Exception:
-            return self._central.list_assets(created_by=created_by, taxonomy_prefix=taxonomy_prefix,
-                                             updated_since=updated_since)
+            # the local reader returns every match; the central /assets defaults to
+            # limit=500, so page the fallback to completion for parity (no truncation).
+            out: list[dict] = []
+            offset = 0
+            while True:
+                page = self._central.list_assets(
+                    created_by=created_by, taxonomy_prefix=taxonomy_prefix,
+                    updated_since=updated_since, limit=_LIST_PAGE, offset=offset)
+                out.extend(page)
+                if len(page) < _LIST_PAGE:
+                    return out
+                offset += _LIST_PAGE
 
     # ---- writes: central if up, else outbox + optimistic replica patch ----
 
@@ -244,16 +302,30 @@ class HybridClient:
         rep.close()
         return result
 
-    def declare(self, asset_type: str, actor: str) -> dict:
+    @staticmethod
+    def _blank_record(asset_id: str, asset_type: str | None = None,
+                      created_by: str | None = None) -> dict:
+        """A resolve-shaped record for an asset we only know locally (offline)."""
+        return {
+            "id": asset_id, "asset_type": asset_type, "created_by": created_by,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "meta": {"id": asset_id, "asset_type": asset_type, "lifecycle": "provisional",
+                     "created_by": created_by},
+            "identity": {"display_name": None, "taxonomy": None, "status": None,
+                         "tags": [], "attributes": {}},
+            "source": None, "runtime": None,
+        }
+
+    def declare(self, asset_type: str, created_by: str, origin: dict | None = None) -> dict:
         asset_id = str(uuid.uuid4())                      # durable id, offline or not (spec §5.3)
-        payload = {"id": asset_id, "asset_type": asset_type, "created_by": actor}
-        asset = {"id": asset_id, "name": asset_id, "asset_type": asset_type,
-                 "status": "declared", "created_by": actor, "updated_at": None}
+        payload = {"id": asset_id, "asset_type": asset_type, "created_by": created_by,
+                   "origin": origin}
+        record = self._blank_record(asset_id, asset_type, created_by)
         def patch(rep):
-            _replica.upsert_asset(rep, asset)
-            return asset
+            _replica.upsert_asset(rep, record)
+            return record
         def apply_central():
-            result = self._central.declare(asset_type, actor, asset_id=asset_id)
+            result = self._central.declare(asset_type, created_by, origin=origin, asset_id=asset_id)
             if isinstance(result, str):
                 return {"id": result, "asset_type": asset_type}
             return result
@@ -264,11 +336,13 @@ class HybridClient:
         payload = {"asset_id": asset_id, "location_uri": location_uri,
                    "tool": tool, "revision": revision, "published_by": published_by}
         def patch(rep):
-            asset = _replica.get_asset(rep, asset_id) or {"id": asset_id, "name": asset_id,
-                                                          "asset_type": "unknown"}
-            asset["source"] = {"location_uri": location_uri, "tool": tool, "revision": revision}
-            _replica.upsert_asset(rep, asset)
-            return asset
+            record = _replica.get_asset(rep, asset_id) or self._blank_record(asset_id)
+            record["source"] = {"location_uri": location_uri, "tool": tool,
+                                "revision": revision, "version_num": None, "is_latest": True,
+                                "published_by": published_by,
+                                "published_at": datetime.now(timezone.utc).isoformat()}
+            _replica.upsert_asset(rep, record)
+            return record
         return self._write("bind_source", payload, asset_id,
                            lambda: self._central.bind_source(asset_id, location_uri, tool, revision, published_by),
                            patch)
@@ -288,23 +362,32 @@ class HybridClient:
     def rename(self, asset_id: str, new_name: str, actor: str) -> dict:
         payload = {"asset_id": asset_id, "new_name": new_name, "actor": actor}
         def patch(rep):
-            asset = _replica.get_asset(rep, asset_id)
-            if asset:
-                asset["name"] = new_name
-                _replica.upsert_asset(rep, asset)
+            record = _replica.get_asset(rep, asset_id)
+            if record:
+                record.setdefault("identity", {})["display_name"] = new_name
+                _replica.upsert_asset(rep, record)
             return payload
         return self._write("rename", payload, asset_id,
                            lambda: self._central.rename(asset_id, new_name, actor), patch)
+
+    @staticmethod
+    def _patch_location(record: dict, facet: str, new_location_uri: str) -> None:
+        key = "runtime" if facet == "runtime" else "source"
+        facet_obj = record.get(key) or {}
+        facet_obj["location_uri"] = new_location_uri
+        record[key] = facet_obj
 
     def relocate(self, asset_id: str, new_location_uri: str, actor: str,
                  facet: str = "source", new_revision: str | None = None) -> dict:
         payload = {"asset_id": asset_id, "new_location_uri": new_location_uri, "actor": actor,
                    "facet": facet, "new_revision": new_revision}
         def patch(rep):
-            asset = _replica.get_asset(rep, asset_id)
-            if asset:
-                asset.setdefault("source", {})["location_uri"] = new_location_uri
-                _replica.upsert_asset(rep, asset)
+            record = _replica.get_asset(rep, asset_id)
+            if record:
+                self._patch_location(record, facet, new_location_uri)
+                if new_revision is not None and facet != "runtime":
+                    record["source"]["revision"] = new_revision
+                _replica.upsert_asset(rep, record)
             return payload
         return self._write("relocate", payload, asset_id,
                            lambda: self._central.relocate(asset_id, new_location_uri, actor,
@@ -315,10 +398,10 @@ class HybridClient:
         payload = {"moves": moves}
         def patch(rep):
             for m in moves:
-                asset = _replica.get_asset(rep, m["asset_id"])
-                if asset:
-                    asset.setdefault("source", {})["location_uri"] = m["new_location_uri"]
-                    _replica.upsert_asset(rep, asset)
+                record = _replica.get_asset(rep, m["asset_id"])
+                if record:
+                    self._patch_location(record, m.get("facet", "source"), m["new_location_uri"])
+                    _replica.upsert_asset(rep, record)
             return payload
         return self._write("bulk_relocate", payload, None,
                            lambda: self._central.bulk_relocate(moves), patch)

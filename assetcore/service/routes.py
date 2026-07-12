@@ -13,10 +13,11 @@ and non-blocking enough for this service's scale.
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
-from assetcore.app.services import AssetcoreService
+from assetcore.app.services import AssetcoreService, DeclareConflict
+from assetcore.core.errors import VersionConflict
 from assetcore.service import auth
 from assetcore.service.events import event_source
 from assetcore.service.schemas import (
@@ -85,7 +86,10 @@ async def metrics(request: Request, service: AssetcoreService = Depends(get_serv
 @router.post("/assets", response_model=DeclareResponse, status_code=201)
 async def declare(body: DeclareRequest, response: Response, service: AssetcoreService = Depends(get_service),
                   _: str = Depends(auth.require(auth.ARTIST, auth.ENGINE))) -> DeclareResponse:
-    result = service.declare(body.asset_type, body.created_by, body.origin, asset_id=body.id)
+    try:
+        result = service.declare(body.asset_type, body.created_by, body.origin, asset_id=body.id)
+    except DeclareConflict as exc:   # same id, different payload -> genuine collision
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not result.created:
         response.status_code = 200
     return DeclareResponse(id=result.id)
@@ -96,19 +100,23 @@ async def list_assets(
     created_by: str | None = None,
     taxonomy_prefix: str | None = None,
     updated_since: datetime | None = None,
+    limit: int = Query(default=500, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
     service: AssetcoreService = Depends(get_service),
 ) -> list[AssetSummaryOut]:
     assets = service.list_assets(
         created_by=created_by,
         taxonomy_prefix=taxonomy_prefix,
         updated_since=updated_since,
+        limit=limit,
+        offset=offset,
     )
     return [
         AssetSummaryOut(
             id=a["id"],
             asset_type=a["asset_type"],
             created_by=a["created_by"],
-            created_at=a["created_at"].isoformat(),
+            created_at=a["created_at"],
             meta=AssetMetaOut.model_validate(a["meta"]) if a["meta"] else None,
             identity=IdentityOut.model_validate(a["identity"]) if a["identity"] else None,
             source=SourceOut.model_validate(a["source"]) if a["source"] else None,
@@ -135,7 +143,11 @@ async def resolve(asset_id: UUID, service: AssetcoreService = Depends(get_servic
 async def claim(asset_id: UUID, body: ClaimRequest, service: AssetcoreService = Depends(get_service),
                 _: str = Depends(auth.require(auth.PRODUCTION))) -> Response:
     _require_asset(service, asset_id)
-    service.claim(asset_id, body.display_name, body.taxonomy, body.actor, **body.attributes)
+    try:
+        service.claim(asset_id, body.display_name, body.taxonomy, body.actor,
+                      reactivate=body.reactivate, attributes=body.attributes)
+    except ValueError as exc:   # claiming a deprecated asset without reactivate=True
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(status_code=204)
 
 
@@ -176,16 +188,41 @@ async def bind_source(asset_id: UUID, body: BindSourceRequest,
                       service: AssetcoreService = Depends(get_service),
                       _: str = Depends(auth.require(auth.ARTIST))) -> VersionResponse:
     _require_asset(service, asset_id)
-    v = service.bind_source(asset_id, body.location_uri, body.tool, body.revision, body.published_by)
+    try:
+        v = service.bind_source(asset_id, body.location_uri, body.tool, body.revision, body.published_by)
+    except VersionConflict as exc:   # lost the version race past the retry budget -> retryable
+        raise HTTPException(status_code=503, detail=str(exc),
+                            headers={"Retry-After": "1"}) from exc
     return VersionResponse(version=v)
+
+
+@router.get("/assets/{asset_id}/source/versions", response_model=list[SourceOut])
+async def source_versions(asset_id: UUID,
+                          service: AssetcoreService = Depends(get_service)) -> list[SourceOut]:
+    """Full source version history (ascending), newest reachable via is_latest."""
+    _require_asset(service, asset_id)
+    return [SourceOut.model_validate(v) for v in service.source_versions(asset_id)]
+
+
+@router.get("/assets/{asset_id}/runtime/versions", response_model=list[RuntimeOut])
+async def runtime_versions(asset_id: UUID,
+                           service: AssetcoreService = Depends(get_service)) -> list[RuntimeOut]:
+    """Full runtime version history (ascending)."""
+    _require_asset(service, asset_id)
+    return [RuntimeOut.model_validate(v) for v in service.runtime_versions(asset_id)]
 
 
 @router.post("/assets/{asset_id}/runtime", response_model=VersionResponse)
 async def bind_runtime(asset_id: UUID, body: BindRuntimeRequest,
                        service: AssetcoreService = Depends(get_service),
-                       _: str = Depends(auth.require(auth.ENGINE, auth.BUILD))) -> VersionResponse:
+                       authority: str = Depends(auth.require(auth.ENGINE, auth.BUILD))) -> VersionResponse:
     _require_asset(service, asset_id)
-    v = service.bind_runtime(asset_id, body.location_uri, body.build_id)
+    actor = body.actor if body.actor is not None else authority
+    try:
+        v = service.bind_runtime(asset_id, body.location_uri, body.build_id, actor)
+    except VersionConflict as exc:   # lost the version race past the retry budget -> retryable
+        raise HTTPException(status_code=503, detail=str(exc),
+                            headers={"Retry-After": "1"}) from exc
     return VersionResponse(version=v)
 
 
@@ -206,9 +243,11 @@ async def relate(body: RelateRequest, service: AssetcoreService = Depends(get_se
 
 @router.post("/set_binding", status_code=204)
 async def set_binding(body: SetBindingRequest, service: AssetcoreService = Depends(get_service),
-                      _: str = Depends(auth.get_authority)) -> Response:
+                      authority: str = Depends(auth.get_authority)) -> Response:
+    actor = body.actor if body.actor is not None else authority
     try:
-        service.set_binding(body.from_asset, body.to_asset, body.binding_mode, body.pinned_version)
+        service.set_binding(body.from_asset, body.to_asset, body.binding_mode,
+                            body.pinned_version, actor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(status_code=204)
@@ -282,15 +321,19 @@ async def find_similar(name: str, asset_type: str | None = None,
 
 
 @router.get("/worklist/provisional", response_model=list[WorklistItem])
-async def backfill_worklist(service: AssetcoreService = Depends(get_service)) -> list[WorklistItem]:
+async def backfill_worklist(
+    limit: int = Query(default=500, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+    service: AssetcoreService = Depends(get_service),
+) -> list[WorklistItem]:
     """The provisional backfill queue Production grooms (oldest first)."""
     return [
         WorklistItem(
             id=asset.id, asset_type=asset.asset_type, created_by=asset.created_by,
-            created_at=asset.created_at.isoformat(), origin=asset.origin,
+            created_at=asset.created_at, origin=asset.origin,
             display_name=identity.display_name if identity else None,
         )
-        for asset, identity in service.backfill_worklist()
+        for asset, identity in service.backfill_worklist(limit=limit, offset=offset)
     ]
 
 
