@@ -100,7 +100,7 @@ All verbs emit JSON on stdout; exit `0` on success, `1` on failure (except `serv
 | `hub sync-outbox --config <toml>` | Replay pending outbox entries to central |
 | `hub retry-failed --config <toml>` | Reset failed → pending and replay |
 | `hub health --config <toml>` | `{central, local_reader, outbox_pending, outbox_failed}` |
-| `hub list-targets --config <toml>` | `[{id, label, icon, available, reason}]` for UGS UI |
+| `hub list-targets --config <toml>` | `[{id, label, icon, available, reason, executable_path}]` for UGS UI |
 
 Example studio config: [`pipeline.toml.example`](pipeline.toml.example) (6 DCC launch targets, `${VAR}` expansion per spec §6.1).
 

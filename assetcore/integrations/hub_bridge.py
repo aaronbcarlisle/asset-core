@@ -84,7 +84,8 @@ def _cmd_list_targets(args) -> int:
     for t in pipeline.launch_targets:
         exe, reason = resolve_target(t, os.environ, builtins)
         out.append({"id": t.id, "label": t.label, "icon": t.icon,
-                    "available": exe is not None, "reason": reason})
+                    "available": exe is not None, "reason": reason,
+                    "executable_path": exe})
     _emit(out)
     return 0
 
