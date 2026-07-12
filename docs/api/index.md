@@ -20,5 +20,5 @@ import firewall — see [Development Guide](../DEVELOPMENT.md#5-the-dependency-f
 | **L4 integrations** | [integrations](integrations.md) | disposable tool translators — Maya, Max, Blender, Substance, Unreal, Photoshop, ShotGrid, Jira. |
 
 Private members (leading underscore) are hidden by default. The reference reflects
-the layered package under `assetcore/`; the original single-file prototype
-(`assetcore/api.py`) is intentionally excluded.
+the layered package under `assetcore/`; the original single-file prototype (frozen
+under `examples/prototype/`) is intentionally excluded.

@@ -3,8 +3,7 @@
 `sdk` may import only stdlib + http (never the core); `integrations` may import only
 `sdk`. This source-level check is the zero-dependency backstop for the full
 import-linter contract (Phase 8). It recurses subpackages, resolves relative
-imports, and flags ANY internal `assetcore.*` import outside the allowed prefix
-(so e.g. importing the prototype `assetcore.api` fails too).
+imports, and flags ANY internal `assetcore.*` import outside the allowed prefix.
 """
 import ast
 import pathlib

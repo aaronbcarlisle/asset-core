@@ -137,20 +137,23 @@ assetcore/
     providers.py       the generic capability→provider registry
     settings.py        load/validate assetcore.toml, expand ${ENV}, build providers
   integrations/  L4  disposable translators — maya, max, blender, substance, unreal, photoshop, shotgrid, jira
-  db/            schema.sql (Postgres dialect) + alembic migrations
+  infra/schema.sql   the canonical Postgres-dialect DDL the repos bootstrap from
+  db/            alembic migrations (the managed production schema path)
 
 docs/            the documents (this file lives here)
+examples/        prototype/ — the frozen single-file seed (reference only)
 scripts/         operational drivers — live_* (drive real tools), demo_* (narrated), validate_config, stamp_coverage_gate
-tests/           unit/ · contract/ · integration/ + the protected prototype scenarios
-demo.py          narrated end-to-end run (the seed)
+tests/           unit/ · contract/ · integration/ · sdk/
+demo.py          narrated end-to-end run on the layered stack (in-memory, zero setup)
 ```
 
-### The protected prototype seed
+### The prototype seed (frozen, moved out)
 
-`assetcore/api.py`, `assetcore/db/schema.sql`, `demo.py`, and
-`tests/test_scenarios.py` are the original single-file prototype. They are kept
-**runnable and untouched** as a reference and a regression anchor — do not edit
-them. New work lives in the layered tree above.
+The original single-file prototype (`api.py`, `connection.py`, `schema.sql`, its
+`demo.py`) now lives under **`examples/prototype/`** as frozen reference — it is not
+imported by the `assetcore` package or run by the suite. The layered tree above is
+the product; `examples/prototype/README.md` maps the old files onto it. The
+repo-root `demo.py` is the maintained walkthrough (layered stack, in-memory).
 
 ---
 
@@ -245,7 +248,7 @@ Layout and intent:
 | `tests/unit/` | the rules and verbs in isolation | call `verbs.*` / `rules.*` against `InMemoryRepo` + `InMemorySink` |
 | `tests/contract/` | the wire contract + that every adapter behaves identically | drive the real `create_app()` stack through a `TestClient` via `AssetcoreClient` |
 | `tests/integration/` | end-to-end workflows on real backends | parametrized across in-memory **and** sqlite (and Postgres when `ASSETCORE_TEST_DSN` is set) |
-| `tests/test_scenarios.py` | the protected prototype still works | leave untouched |
+| `tests/unit/test_scenarios.py` | the 3 scenarios against the layered stack | call `verbs.*` vs `InMemoryRepo` |
 
 The contract suite's shared fixtures (`tests/contract/conftest.py`) give you a
 `service` (a `TestClient` over a fresh sqlite app) and a `make_client(token)`
@@ -420,7 +423,7 @@ only when asked. Keep the firewall green and the suite passing in every commit.
 | swap storage / tracker | `assetcore.toml` (+ a provider registration if new) |
 | teach the system a new URI scheme | `sdk/resolvers.py` |
 | add a reactive recipe | `sdk/automation.py` consumers (register handlers) |
-| change the data model | `core/entities.py` + `core/types.py` + `db/schema.sql` + a migration |
+| change the data model | `core/entities.py` + `core/types.py` + `infra/schema.sql` + a migration |
 
 For copy-paste usage of every capability above, see **[`COOKBOOK.md`](COOKBOOK.md)**.
 

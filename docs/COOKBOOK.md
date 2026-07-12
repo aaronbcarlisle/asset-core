@@ -702,7 +702,7 @@ treatment + how to add a provider: [`PROVIDER_LAYER.md`](PROVIDER_LAYER.md) and
 ## 7. End-to-end: the three canonical scenarios
 
 Worked with the in-process service (run as a script, or adapt to the SDK). These are
-the same scenarios the suite proves in `tests/test_scenarios.py`.
+the same scenarios the suite proves in `tests/unit/test_scenarios.py`.
 
 ### The barrel — reuse instead of copy-paste
 

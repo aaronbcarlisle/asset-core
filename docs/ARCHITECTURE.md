@@ -674,18 +674,24 @@ which was the whole point.
 
 ---
 
-## Appendix A — Mapping the prototype you already have onto this
+## Appendix A — Mapping the prototype onto this
 
-The prototype (`api.py`, `schema.sql`, the tests) is not thrown away — it's the
+> The prototype has been built out into the layered package described above; its
+> original single-file form is now frozen under `examples/prototype/` for reference
+> (see that folder's README). This appendix records how the seed maps onto the
+> layers — it is the completed plan, not pending work.
+
+The prototype (`api.py`, `schema.sql`, the tests) was not thrown away — it was the
 seed of L0+L1+infra:
 
 - `api.py`'s functions → split: pure bits (`resolve_dependency`'s logic, latest-
   version rule) move to `core/rules.py`; the orchestration becomes `app/verbs.py`.
-- `schema.sql` → `db/schema.sql` essentially as-is (it's already the 5 tables).
-- `connection.py`'s SqliteDB/PostgresDB → become `infra/sqlite_repo.py` /
+- `schema.sql` → `infra/schema.sql` with the tool-agnostic column renames
+  (`location_uri`/`tool`/`revision`); it's still the same 5 tables.
+- `connection.py`'s SqliteDB/PostgresDB → became `infra/sqlite_repo.py` /
   `infra/postgres_repo.py` implementing the `AssetRepo` port.
-- `tests/test_scenarios.py` → `tests/unit/` (run vs InMemoryRepo) — they barely
-  change, which is itself evidence the model was right.
+- the prototype scenario tests → `tests/unit/test_scenarios.py` (run vs
+  InMemoryRepo) — they barely changed, which is itself evidence the model was right.
 - `integrations/maya.py` & `unreal.py` stubs → reshaped onto the L3 base classes.
 
 So Phase 1 starts from working code, not a blank page.

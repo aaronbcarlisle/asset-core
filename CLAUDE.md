@@ -20,9 +20,10 @@ core idea.
    idea, with the three scenarios worked through.
 3. **`docs/ROADMAP.md`** — phase/task tracking.
 
-The current code (`assetcore/api.py`, `db/schema.sql`, `tests/`) is the **working
-prototype seed**. ARCHITECTURE.md Appendix A explains exactly how it maps onto the
-layered target — Phase 1 starts from this code, not a blank page.
+The layered `assetcore/` package IS the product. The original single-file **prototype
+seed** (`api.py`, `connection.py`, `schema.sql`, its `demo.py`) is frozen under
+`examples/prototype/` for reference; ARCHITECTURE.md Appendix A + that folder's
+README explain how it maps onto the layered target.
 
 ## The thesis (the entire point of the project)
 
@@ -80,11 +81,12 @@ Full anti-pattern catalogue: ARCHITECTURE Part 11.
 7. ShotGrid as a view + backfill worklist + dedupe nudge + validation gates
 8. Hardening: stamp-coverage CI gate, idempotent events, observability, backup
 
-## How to run the current prototype
+## How to run
 
 ```bash
-python demo.py            # narrated walkthrough of the 3 scenarios
-python -m pytest tests/   # the suite (in-memory SQLite, zero setup)
+python demo.py                     # narrated walkthrough of the 3 scenarios (layered, in-memory)
+python -m pytest tests/            # the suite (in-memory SQLite, zero setup)
+python examples/prototype/demo.py  # the frozen original prototype (reference)
 ```
 
 ## Tone for working here
