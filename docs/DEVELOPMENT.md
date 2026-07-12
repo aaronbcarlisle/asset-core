@@ -165,6 +165,12 @@ it, each owned by one authority, bound only by the UUID. Nothing is inferred.
 | `IdentityFacet` | Production | `display_name`, `taxonomy`, `status`, `tags`, `attributes` | a **rename touches only this** |
 | `SourceVersion` | Artist/DCC | `location_uri`, `tool`, `revision`, `version_num`, `is_latest` | authored truth; versioned; location is **opaque** |
 | `RuntimeVersion` | engine/build | `location_uri`, `build_id`, `version_num`, `is_latest` | the cooked/imported asset; versioned |
+
+> Version numbers are `max+1` per asset per facet, guarded by
+> `UNIQUE(asset_id, version_num)` + a `one_latest_*` partial unique index. Two
+> publishers racing for the same number get a typed `VersionConflict` from the
+> repo; `bind_source`/`bind_runtime` re-read and retry (bounded), so concurrent
+> publishes land as distinct monotonic versions instead of a 500.
 | `Relationship` | any | `from_asset`, `to_asset`, `rel_type`, `binding_mode`, `pinned_version`, `attributes` | a typed, directed edge |
 | `Event` | — | `asset_id`, `event_type`, `payload`, `actor`, `id` | append-only; every facet write emits one |
 

@@ -18,8 +18,14 @@ from assetcore.core.entities import (
     RuntimeVersion,
     SourceVersion,
 )
+from assetcore.core.errors import VersionConflict
 from assetcore.core.ports import AssetRepo, EventSink
 from assetcore.core.types import BindingMode, Lifecycle, RelType
+
+# bind_source/bind_runtime compute version = max+1 then insert; if a concurrent
+# publisher took that number the repo raises VersionConflict. Re-read and retry a
+# few times before giving up (bounded, so a genuinely stuck write still surfaces).
+_VERSION_WRITE_ATTEMPTS = 5
 
 
 # ---------------------------------------------------------------------------
@@ -110,13 +116,20 @@ def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: 
     demoted as part of the same write (the ``one_latest_source`` invariant). Emits
     a ``source.published`` event.
     """
-    v = rules.next_version_num(repo.source_versions(asset_id))
     # The repo demotes the prior latest as part of the write (the schema's
-    # one_latest_source unique index forces demote-then-insert atomically).
-    repo.add_source_version(SourceVersion(
-        asset_id=asset_id, location_uri=location_uri, tool=tool,
-        revision=str(revision), version_num=v, is_latest=True, published_by=published_by,
-    ))
+    # one_latest_source unique index forces demote-then-insert atomically). On a
+    # concurrent-version race the repo raises VersionConflict; re-read + retry.
+    for attempt in range(_VERSION_WRITE_ATTEMPTS):
+        v = rules.next_version_num(repo.source_versions(asset_id))
+        try:
+            repo.add_source_version(SourceVersion(
+                asset_id=asset_id, location_uri=location_uri, tool=tool,
+                revision=str(revision), version_num=v, is_latest=True, published_by=published_by,
+            ))
+            break
+        except VersionConflict:
+            if attempt == _VERSION_WRITE_ATTEMPTS - 1:
+                raise
     sink.emit(Event(asset_id, "source.published",
                     {"location_uri": location_uri, "version": v, "tool": tool}, published_by))
     return v
@@ -133,12 +146,19 @@ def bind_runtime(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri:
     demoted at write time (the ``one_latest_runtime`` invariant). Emits a
     ``runtime.cooked`` event.
     """
-    v = rules.next_version_num(repo.runtime_versions(asset_id))
-    # one_latest_runtime invariant is enforced at write time by the repo.
-    repo.add_runtime_version(RuntimeVersion(
-        asset_id=asset_id, location_uri=location_uri, build_id=build_id,
-        version_num=v, is_latest=True,
-    ))
+    # one_latest_runtime invariant is enforced at write time by the repo; a
+    # concurrent-version race raises VersionConflict -> re-read + retry (bounded).
+    for attempt in range(_VERSION_WRITE_ATTEMPTS):
+        v = rules.next_version_num(repo.runtime_versions(asset_id))
+        try:
+            repo.add_runtime_version(RuntimeVersion(
+                asset_id=asset_id, location_uri=location_uri, build_id=build_id,
+                version_num=v, is_latest=True,
+            ))
+            break
+        except VersionConflict:
+            if attempt == _VERSION_WRITE_ATTEMPTS - 1:
+                raise
     sink.emit(Event(asset_id, "runtime.cooked",
                     {"location_uri": location_uri, "version": v}, "build"))
     return v

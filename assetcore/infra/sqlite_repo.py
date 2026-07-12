@@ -23,6 +23,7 @@ from assetcore.core.entities import (
     RuntimeVersion,
     SourceVersion,
 )
+from assetcore.core.errors import VersionConflict
 from assetcore.core.types import BindingMode, Lifecycle, RelType
 
 _SCHEMA_PATH = pathlib.Path(__file__).parent / "schema.sql"
@@ -147,19 +148,31 @@ class SqliteRepo:
                 (Lifecycle(lifecycle).value, str(asset_id)),
             )
 
+    @staticmethod
+    def _as_version_conflict(exc: sqlite3.IntegrityError) -> None:
+        # a UNIQUE(asset_id, version_num) or one_latest_* violation means another
+        # writer advanced the version concurrently -> retryable VersionConflict.
+        # FK / other integrity errors are real bugs; re-raise them untouched.
+        if "unique" in str(exc).lower():
+            raise VersionConflict(str(exc)) from exc
+        raise exc
+
     # --- source facet ---
     def add_source_version(self, v: SourceVersion) -> None:
-        with self.conn:   # demote + insert atomically -> one_latest_source holds
-            self.conn.execute(
-                "UPDATE facet_source_version SET is_latest=0 WHERE asset_id=? AND is_latest=1",
-                (str(v.asset_id),))
-            self.conn.execute(
-                "INSERT INTO facet_source_version"
-                " (asset_id, location_uri, tool, revision, version_num, is_latest, published_at, published_by)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                (str(v.asset_id), v.location_uri, v.tool, v.revision, v.version_num,
-                 1 if v.is_latest else 0, _dt(v.published_at), v.published_by),
-            )
+        try:
+            with self.conn:   # demote + insert atomically -> one_latest_source holds
+                self.conn.execute(
+                    "UPDATE facet_source_version SET is_latest=0 WHERE asset_id=? AND is_latest=1",
+                    (str(v.asset_id),))
+                self.conn.execute(
+                    "INSERT INTO facet_source_version"
+                    " (asset_id, location_uri, tool, revision, version_num, is_latest, published_at, published_by)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    (str(v.asset_id), v.location_uri, v.tool, v.revision, v.version_num,
+                     1 if v.is_latest else 0, _dt(v.published_at), v.published_by),
+                )
+        except sqlite3.IntegrityError as exc:
+            self._as_version_conflict(exc)
 
     def update_source_location(self, asset_id: UUID, new_location_uri: str,
                                new_revision: str | None = None) -> bool:
@@ -190,17 +203,20 @@ class SqliteRepo:
 
     # --- runtime facet ---
     def add_runtime_version(self, v: RuntimeVersion) -> None:
-        with self.conn:
-            self.conn.execute(
-                "UPDATE facet_runtime_version SET is_latest=0 WHERE asset_id=? AND is_latest=1",
-                (str(v.asset_id),))
-            self.conn.execute(
-                "INSERT INTO facet_runtime_version"
-                " (asset_id, location_uri, build_id, version_num, is_latest, cooked_at)"
-                " VALUES (?, ?, ?, ?, ?, ?)",
-                (str(v.asset_id), v.location_uri, v.build_id, v.version_num,
-                 1 if v.is_latest else 0, _dt(v.cooked_at)),
-            )
+        try:
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE facet_runtime_version SET is_latest=0 WHERE asset_id=? AND is_latest=1",
+                    (str(v.asset_id),))
+                self.conn.execute(
+                    "INSERT INTO facet_runtime_version"
+                    " (asset_id, location_uri, build_id, version_num, is_latest, cooked_at)"
+                    " VALUES (?, ?, ?, ?, ?, ?)",
+                    (str(v.asset_id), v.location_uri, v.build_id, v.version_num,
+                     1 if v.is_latest else 0, _dt(v.cooked_at)),
+                )
+        except sqlite3.IntegrityError as exc:
+            self._as_version_conflict(exc)
 
     def update_runtime_location(self, asset_id: UUID, new_location_uri: str) -> bool:
         with self.conn:
