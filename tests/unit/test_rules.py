@@ -92,6 +92,26 @@ def test_self_edge_raises():
         rules.validate_relationship(r)
 
 
+def test_pin_without_version_raises():
+    # a PIN with no pinned_version resolves to nothing — the footgun this guards
+    r = Relationship(uuid4(), uuid4(), RelType.DEPENDS_ON, binding_mode=BindingMode.PIN)
+    with pytest.raises(ValueError, match="pinned_version"):
+        rules.validate_relationship(r)
+
+
+def test_pinned_version_without_pin_raises():
+    r = Relationship(uuid4(), uuid4(), RelType.DEPENDS_ON,
+                     binding_mode=BindingMode.FLOAT, pinned_version=2)
+    with pytest.raises(ValueError, match="pinned_version"):
+        rules.validate_relationship(r)
+
+
+def test_valid_pin_with_version_ok():
+    r = Relationship(uuid4(), uuid4(), RelType.DEPENDS_ON,
+                     binding_mode=BindingMode.PIN, pinned_version=1)
+    rules.validate_relationship(r)   # must not raise
+
+
 def test_valid_depends_on_with_binding_mode_ok():
     r = Relationship(uuid4(), uuid4(), RelType.DEPENDS_ON, binding_mode=BindingMode.FLOAT)
     rules.validate_relationship(r)   # must not raise

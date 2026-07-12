@@ -250,9 +250,11 @@ assetcore bind-runtime <id> /Game/Props/Barrel.uasset --build nightly-4821
 
 Assert a **new** typed edge between two identities. `binding_mode`/`pinned_version`
 are valid only on `DEPENDS_ON`. Self-edges and a binding_mode on a non-`DEPENDS_ON`
-edge are rejected (**400** over HTTP). For `DERIVED_FROM`, the edge records the
-parent's current source version so [staleness](#stale-derivations) can be detected
-later.
+edge are rejected (**400** over HTTP). A `pin` binding **must** carry a
+`pinned_version` (a pin with none would resolve to nothing — rejected **400**);
+conversely a `pinned_version` is only accepted with `pin`. For `DERIVED_FROM`, the
+edge records the parent's current source version so [staleness](#stale-derivations)
+can be detected later.
 
 ```python
 from assetcore.core.types import RelType, BindingMode

@@ -30,6 +30,26 @@ def test_dependents_bad_rel_type_is_400(make_client):
     assert exc.value.response.status_code == 400
 
 
+def test_relate_pin_without_version_is_400(make_client):
+    c = make_client("artist-token")
+    a = c.declare("anim", "amy")
+    b = c.declare("material", "amy")
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        c.relate(a, b, "DEPENDS_ON", binding_mode="pin")   # missing pinned_version
+    assert exc.value.response.status_code == 400
+    assert "pinned_version" in exc.value.response.text
+
+
+def test_set_binding_pin_without_version_is_400(make_client):
+    c = make_client("artist-token")
+    a = c.declare("anim", "amy")
+    b = c.declare("material", "amy")
+    c.relate(a, b, "DEPENDS_ON", binding_mode="float")
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        c.set_binding(a, b, "pin")                          # missing pinned_version
+    assert exc.value.response.status_code == 400
+
+
 def test_relocate_over_http(make_client):
     artist, prod = make_client("artist-token"), make_client("prod-token")
     a = artist.declare("prop", "amy")

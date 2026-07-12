@@ -42,6 +42,27 @@ def test_set_binding_requires_existing_edge(rs):
         verbs.set_binding(repo, sink, a, b, BindingMode.PIN, pinned_version=1)
 
 
+def test_relate_pin_without_version_raises(rs):
+    repo, sink = rs
+    a = verbs.declare(repo, sink, "anim", "lee")
+    b = verbs.declare(repo, sink, "material", "mo")
+    with pytest.raises(ValueError, match="pinned_version"):
+        verbs.relate(repo, sink, a, b, RelType.DEPENDS_ON, "lee",
+                     binding_mode=BindingMode.PIN)          # no pinned_version
+    assert repo.get_edge(a, b, RelType.DEPENDS_ON) is None  # nothing persisted
+
+
+def test_set_binding_pin_without_version_raises(rs):
+    repo, sink = rs
+    a = verbs.declare(repo, sink, "anim", "lee")
+    b = verbs.declare(repo, sink, "material", "mo")
+    verbs.relate(repo, sink, a, b, RelType.DEPENDS_ON, "lee", binding_mode=BindingMode.FLOAT)
+    with pytest.raises(ValueError, match="pinned_version"):
+        verbs.set_binding(repo, sink, a, b, BindingMode.PIN)   # no pinned_version
+    # the edge stays FLOAT — the bad flip did not take
+    assert repo.get_edge(a, b, RelType.DEPENDS_ON).binding_mode == BindingMode.FLOAT
+
+
 def test_set_binding_preserves_edge_attributes(rs):
     repo, sink = rs
     a = verbs.declare(repo, sink, "anim", "lee")

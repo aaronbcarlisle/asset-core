@@ -142,12 +142,14 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
            pinned_version: int | None = None) -> None:
     """Assert a NEW typed edge ``frm -> to``.
 
-    ``binding_mode``/``pinned_version`` are valid only on DEPENDS_ON. For
-    DERIVED_FROM the edge records the parent's current source version, so
-    `stale_derivations` can flag it once the parent advances. The edge is
-    validated (self-edges and a binding_mode on a non-DEPENDS_ON edge raise
-    ``ValueError``). Emits a ``relationship.added`` event. Flipping an existing
-    edge float↔pin is `set_binding`, not this.
+    ``binding_mode``/``pinned_version`` are valid only on DEPENDS_ON. A ``pin``
+    binding must carry a ``pinned_version`` (a pin with none resolves to nothing);
+    a ``pinned_version`` is valid only with ``pin``. For DERIVED_FROM the edge
+    records the parent's current source version, so `stale_derivations` can flag it
+    once the parent advances. The edge is validated (self-edges, a binding_mode on
+    a non-DEPENDS_ON edge, and an inconsistent pin/version raise ``ValueError``).
+    Emits a ``relationship.added`` event. Flipping an existing edge float↔pin is
+    `set_binding`, not this.
 
     Hub/offline replay safety is enforced here by duplicate-edge detection:
     re-applying the same edge raises ``ValueError`` with ``duplicate edge: ...``.
@@ -184,8 +186,10 @@ def set_binding(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID,
     """Flip an EXISTING DEPENDS_ON edge between float and pin (the consumer's call).
 
     ``float`` always resolves to the latest authored version; ``pin`` locks to a
-    specific one. Raises ``ValueError`` if there's no such edge (use `relate`
-    to create one). Emits a ``binding.changed`` event.
+    specific one and therefore requires a ``pinned_version`` (a pin with none
+    raises ``ValueError`` — it would resolve to nothing). Raises ``ValueError`` if
+    there's no such edge (use `relate` to create one). Emits a ``binding.changed``
+    event.
     """
     binding_mode = BindingMode(binding_mode)
     edge = repo.get_edge(frm, to, RelType.DEPENDS_ON)
