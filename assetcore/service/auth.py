@@ -154,7 +154,11 @@ class JwtAuth:
                          "verify_iss": self._issuer is not None},
             )
         except Exception as exc:   # expired / bad signature / wrong iss/aud / malformed
-            raise HTTPException(status_code=401, detail=f"invalid token: {exc}") from exc
+            # the REASON is logged server-side only: echoing it to the caller leaks
+            # validation details (expected issuer/audience, JWKS errors) and makes
+            # the error contract unstable. The client just gets a clean 401.
+            logger.info("rejected bearer token: %s", exc)
+            raise HTTPException(status_code=401, detail="invalid or expired token") from exc
         authority = self._authority_from(claims)
         if authority is None:
             raise HTTPException(

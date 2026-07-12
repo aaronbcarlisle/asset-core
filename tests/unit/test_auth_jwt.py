@@ -83,6 +83,17 @@ def test_bad_signature_is_401():
     assert exc.value.status_code == 401
 
 
+def test_401_detail_never_leaks_validation_internals():
+    # the reason (expected issuer/audience, signature/JWKS errors) is server-log
+    # only; the wire detail is stable and generic.
+    for tok in (_token(issuer="https://evil.test"), _token(audience="other-api"),
+                _token(secret="wrong"), _token(exp_minutes=-5)):
+        with pytest.raises(HTTPException) as exc:
+            _auth().authenticate(_Req(Authorization=f"Bearer {tok}"))
+        assert exc.value.detail == "invalid or expired token"
+        assert "idp.test" not in exc.value.detail and "assetcore" not in exc.value.detail
+
+
 def test_valid_token_without_mappable_role_is_403():
     tok = _token(roles=["janitors"])
     with pytest.raises(HTTPException) as exc:

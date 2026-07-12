@@ -209,10 +209,13 @@ class SqliteRepo:
             return []
         # quoted tokens OR-joined: any shared token surfaces the row (the narrowing
         # contract, rules.is_similarity_candidate); the verb re-ranks the rest.
+        # NOTE: the fts table is deliberately NOT aliased — `<fts-table> MATCH ?`
+        # must reference the table name (an alias fails: "no such column"), so
+        # using the full name everywhere keeps the query unambiguous.
         match = " OR ".join(f'"{t}"' for t in tokens)
-        sql = ("SELECT a.*, fi.* FROM identity_fts f"
-               " JOIN asset a ON a.id = f.asset_id"
-               " JOIN facet_identity fi ON fi.asset_id = f.asset_id"
+        sql = ("SELECT a.*, fi.* FROM identity_fts"
+               " JOIN asset a ON a.id = identity_fts.asset_id"
+               " JOIN facet_identity fi ON fi.asset_id = identity_fts.asset_id"
                " WHERE identity_fts MATCH ?")
         params: list = [match]
         if asset_type is not None:

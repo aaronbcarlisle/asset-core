@@ -14,6 +14,8 @@ normalizes both to the one wire shape.
 import asyncio
 import json
 
+from starlette.concurrency import run_in_threadpool
+
 from assetcore.core.entities import Event
 
 _KEEPALIVE_SECONDS = 15
@@ -69,9 +71,17 @@ async def event_source(sink, request, after_seq: int = 0):
     """
     queue = sink.subscribe()                     # subscribe first, so nothing is missed
     try:
-        if sink.has_gap(after_seq):
+        # a durable sink's catch-up is real (blocking) DB I/O — run it off the loop
+        # when the sink is thread-safe; the in-process sink stays inline (it's a
+        # list slice, and it is loop-confined by design).
+        if getattr(sink, "SUPPORTS_CONCURRENCY", False):
+            gapped = await run_in_threadpool(sink.has_gap, after_seq)
+            replayed = await run_in_threadpool(sink.history, after_seq)
+        else:
+            gapped = sink.has_gap(after_seq)
+            replayed = sink.history(after_seq)
+        if gapped:
             yield _gap_frame(after_seq, sink.dropped_seq)
-        replayed = sink.history(after_seq)
         last = replayed[-1][0] if replayed else after_seq
         for seq, event in replayed:
             yield _format(seq, event)

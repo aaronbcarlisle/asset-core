@@ -94,7 +94,9 @@ async def metrics(request: Request, service: AssetcoreService = Depends(get_serv
     """
     data = await run(service.metrics, datetime.now(timezone.utc))
     lat = request.app.state.latency
-    data["events_emitted"] = getattr(request.app.state.sink, "last_seq", 0)
+    # sink.last_seq is a real SELECT on the durable sink — same offload rule as
+    # every other DB touch (inline for the in-process sink, threadpool for pg).
+    data["events_emitted"] = await run(lambda: getattr(request.app.state.sink, "last_seq", 0))
     data["request_count"] = lat["count"]
     data["avg_latency_ms"] = round(lat["total_ms"] / lat["count"], 2) if lat["count"] else 0.0
     data["max_latency_ms"] = round(lat["max_ms"], 2)

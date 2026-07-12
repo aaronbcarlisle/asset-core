@@ -106,3 +106,37 @@ def test_event_source_serves_dict_entries():
     assert frames[1].startswith("id: 2\nevent: source.published\n")
     assert frames[2].startswith("id: 3\nevent: identity.claimed\n")
     assert '"seq": 3' in frames[2] and '"actor": "amy"' in frames[2]
+
+
+def test_event_source_offloads_catchup_for_concurrent_sinks():
+    # a sink declaring SUPPORTS_CONCURRENCY has its (blocking) history/has_gap run
+    # in the threadpool during SSE connect — same frames, different executor.
+    class ConcurrentSink(DictEntrySink):
+        SUPPORTS_CONCURRENCY = True
+
+        def __init__(self):
+            super().__init__()
+            self.history_thread: str | None = None
+
+        def history(self, after_seq=0):
+            import threading
+            self.history_thread = threading.current_thread().name
+            return super().history(after_seq)
+
+    sink = ConcurrentSink()
+    sink.emit_dict(1, "declared")
+
+    class _FakeRequest:
+        async def is_disconnected(self):
+            return False
+
+    async def drive():
+        gen = event_source(sink, _FakeRequest(), after_seq=0)
+        frame = await gen.__anext__()
+        await gen.aclose()
+        return frame
+
+    frame = asyncio.run(drive())
+    assert frame.startswith("id: 1\nevent: declared\n")
+    assert sink.history_thread is not None
+    assert sink.history_thread != "MainThread"      # ran off the event loop
