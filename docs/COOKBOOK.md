@@ -479,6 +479,13 @@ c.find_similar("barrel", asset_type="prop")        # [{id, display_name, score, 
 assetcore find-similar barrel --type prop
 ```
 
+Scale note: candidates are narrowed by an **index** on the identity's human-facing
+text (display_name / taxonomy / tags) — SQLite FTS5, Postgres `pg_trgm` (migration
+`0002`) — then ranked in Python by the same `similarity_score` as always, so a
+large catalog is never streamed through the ranker. Consequently an asset whose
+*only* token overlap is in `origin`/`asset_type` no longer surfaces; narrowing keys
+on what a human would search by.
+
 ### Backfill worklist
 
 The provisional queue Production grooms — assets declared but not yet claimed,

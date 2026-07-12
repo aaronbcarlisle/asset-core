@@ -64,6 +64,44 @@ class SqliteRepo:
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(_translate_pg_to_sqlite(_SCHEMA_PATH.read_text()))
+        self._init_identity_fts()
+
+    # --- similarity index (FTS5) --------------------------------------------
+    # identity_fts mirrors each identity's human-facing text (display_name +
+    # taxonomy + tags) so search_candidates never scans the whole catalog. It is
+    # a local index, not part of the canonical schema (Postgres uses pg_trgm).
+    def _init_identity_fts(self) -> None:
+        self.conn.execute(
+            "CREATE VIRTUAL TABLE IF NOT EXISTS identity_fts"
+            " USING fts5(asset_id UNINDEXED, text)")
+        # backfill: a database created before this index existed has identities
+        # but an empty fts table — rebuild once so search sees them.
+        has_rows = self.conn.execute("SELECT 1 FROM identity_fts LIMIT 1").fetchone()
+        if has_rows is None:
+            rows = self.conn.execute(
+                "SELECT asset_id, display_name, taxonomy, tags FROM facet_identity").fetchall()
+            with self.conn:
+                for r in rows:
+                    text = self._identity_text(r["display_name"], r["taxonomy"],
+                                               json.loads(r["tags"]))
+                    if text:
+                        self.conn.execute(
+                            "INSERT INTO identity_fts (asset_id, text) VALUES (?, ?)",
+                            (r["asset_id"], text))
+
+    @staticmethod
+    def _identity_text(display_name: str | None, taxonomy: str | None,
+                       tags: list[str]) -> str:
+        return " ".join(filter(None, [display_name, taxonomy, " ".join(tags)]))
+
+    def _reindex_identity(self, identity: IdentityFacet) -> None:
+        """Refresh the FTS row for one identity (caller holds the transaction)."""
+        self.conn.execute("DELETE FROM identity_fts WHERE asset_id = ?",
+                          (str(identity.asset_id),))
+        text = self._identity_text(identity.display_name, identity.taxonomy, identity.tags)
+        if text:
+            self.conn.execute("INSERT INTO identity_fts (asset_id, text) VALUES (?, ?)",
+                              (str(identity.asset_id), text))
 
     def close(self) -> None:
         self.conn.close()
@@ -83,6 +121,7 @@ class SqliteRepo:
                 (str(identity.asset_id), identity.display_name, identity.taxonomy,
                  identity.status, json.dumps(identity.tags), json.dumps(identity.attributes)),
             )
+            self._reindex_identity(identity)
 
     def get_asset(self, asset_id: UUID) -> Asset | None:
         row = self.conn.execute("SELECT * FROM asset WHERE id = ?", (str(asset_id),)).fetchone()
@@ -163,6 +202,32 @@ class SqliteRepo:
             version_num=r["version_num"], is_latest=bool(r["is_latest"]), cooked_at=_parse_dt(r["cooked_at"]),
         ) for r in rows}
 
+    def search_candidates(self, query: str, asset_type: str | None = None,
+                          limit: int = 200) -> list[tuple[Asset, IdentityFacet]]:
+        tokens = re.findall(r"[a-z0-9]+", query.lower())
+        if not tokens:
+            return []
+        # quoted tokens OR-joined: any shared token surfaces the row (the narrowing
+        # contract, rules.is_similarity_candidate); the verb re-ranks the rest.
+        match = " OR ".join(f'"{t}"' for t in tokens)
+        sql = ("SELECT a.*, fi.* FROM identity_fts f"
+               " JOIN asset a ON a.id = f.asset_id"
+               " JOIN facet_identity fi ON fi.asset_id = f.asset_id"
+               " WHERE identity_fts MATCH ?")
+        params: list = [match]
+        if asset_type is not None:
+            sql += " AND a.asset_type = ?"
+            params.append(asset_type)
+        sql += " LIMIT ?"
+        params.append(limit)
+        out = []
+        for r in self.conn.execute(sql, params).fetchall():
+            out.append((self._row_to_asset(r), IdentityFacet(
+                asset_id=UUID(r["asset_id"]), display_name=r["display_name"],
+                taxonomy=r["taxonomy"], status=r["status"], tags=json.loads(r["tags"]),
+                attributes=json.loads(r["attributes"]))))
+        return out
+
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
         row = self.conn.execute(
             "SELECT * FROM facet_identity WHERE asset_id = ?", (str(asset_id),)).fetchone()
@@ -185,6 +250,7 @@ class SqliteRepo:
                 (identity.display_name, identity.taxonomy, identity.status,
                  json.dumps(identity.tags), json.dumps(identity.attributes), str(identity.asset_id)),
             )
+            self._reindex_identity(identity)
 
     def set_lifecycle(self, asset_id: UUID, lifecycle: Lifecycle) -> None:
         with self.conn:

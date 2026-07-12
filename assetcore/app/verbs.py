@@ -296,6 +296,12 @@ def lineage(repo: AssetRepo, asset_id: UUID) -> list[Relationship]:
 # ---------------------------------------------------------------------------
 # FIND_SIMILAR — the reuse-over-rebuild nudge at declare time (advisory only).
 # ---------------------------------------------------------------------------
+# how many index-narrowed candidates to pull before ranking: generous relative to
+# the returned limit, so near-misses still get scored, but bounded so a huge
+# catalog never streams through Python.
+_SIMILAR_CANDIDATE_POOL = 200
+
+
 def find_similar(repo: AssetRepo, name: str, asset_type: str | None = None,
                  limit: int = 10) -> list[tuple]:
     """Rank existing assets that look like `name` so a human can reuse, not rebuild.
@@ -304,14 +310,16 @@ def find_similar(repo: AssetRepo, name: str, asset_type: str | None = None,
     infers identity — the artist still chooses to reuse (relate the existing UUID)
     or declare new. Anti-pattern #5 stays respected.
 
-    Note: this does one get_identity per candidate (an N+1 on SQL backends). It is
-    an interactive, type-scoped, advisory nudge over a single asset_type, so the
-    candidate set is small; a batched list-with-identity port method is a future
-    optimization, not a correctness issue (see PR #7 review thread).
+    Candidates come from `repo.search_candidates` — index-backed narrowing on the
+    identity's human-facing text (display_name/taxonomy/tags; SQLite FTS5 /
+    Postgres pg_trgm) — then the pure `rules.similarity_score` ranks them, so the
+    scoring semantics are unchanged while the scan no longer touches the whole
+    catalog. An asset whose ONLY overlap is origin/asset_type text no longer
+    surfaces (narrowing keys on what a human would search by).
     """
+    pool = max(_SIMILAR_CANDIDATE_POOL, limit * 20)
     scored = []
-    for asset in repo.list_assets(asset_type=asset_type):
-        identity = repo.get_identity(asset.id)
+    for asset, identity in repo.search_candidates(name, asset_type=asset_type, limit=pool):
         score = rules.similarity_score(name, asset, identity)
         if score > 0:
             scored.append((asset, identity, score))

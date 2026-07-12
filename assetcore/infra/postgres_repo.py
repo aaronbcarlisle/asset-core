@@ -52,6 +52,25 @@ class PostgresRepo:
         self.conn = psycopg2.connect(dsn)
         with self.conn, self.conn.cursor() as cur:
             cur.execute(_BOOTSTRAP_DDL)
+        self._init_trgm_indexes()
+
+    def _init_trgm_indexes(self) -> None:
+        """Best-effort pg_trgm GIN indexes for search_candidates' ILIKE narrowing.
+
+        CREATE EXTENSION needs privileges we may not have (same reason the
+        bootstrap strips pgcrypto); without them the ILIKE queries still return
+        correct results, just unindexed — so failure here degrades performance,
+        never correctness. The managed path is alembic migration 0002.
+        """
+        try:
+            with self.conn, self.conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+                cur.execute("CREATE INDEX IF NOT EXISTS identity_name_trgm"
+                            " ON facet_identity USING gin (display_name gin_trgm_ops)")
+                cur.execute("CREATE INDEX IF NOT EXISTS identity_taxonomy_trgm"
+                            " ON facet_identity USING gin (taxonomy gin_trgm_ops)")
+        except self._psycopg2.Error:
+            self.conn.rollback()   # unprivileged server: run unindexed (correct, slower)
 
     def close(self) -> None:
         self.conn.close()
@@ -142,6 +161,38 @@ class PostgresRepo:
             asset_id=r["asset_id"], location_uri=r["location_uri"], build_id=r["build_id"],
             version_num=r["version_num"], is_latest=r["is_latest"], cooked_at=r["cooked_at"],
         ) for r in rows}
+
+    def search_candidates(self, query: str, asset_type: str | None = None,
+                          limit: int = 200) -> list[tuple[Asset, IdentityFacet]]:
+        import re as _re
+        tokens = _re.findall(r"[a-z0-9]+", query.lower())
+        if not tokens:
+            return []
+        # ILIKE-per-token is a SUPERSET of the token-overlap narrowing contract
+        # (substring ⊇ exact token); the verb re-ranks and drops score-0 rows, so
+        # results match the other backends. tokens are [a-z0-9]+ — no LIKE
+        # metacharacters to escape. The trgm GIN indexes accelerate the ILIKEs.
+        patterns = [f"%{t}%" for t in tokens]
+        sql = ("SELECT a.id, a.lifecycle, a.asset_type, a.created_at, a.created_by, a.origin,"
+               "       fi.asset_id, fi.display_name, fi.taxonomy, fi.status, fi.tags, fi.attributes"
+               " FROM facet_identity fi JOIN asset a ON a.id = fi.asset_id"
+               " WHERE (fi.display_name ILIKE ANY(%s) OR fi.taxonomy ILIKE ANY(%s)"
+               "        OR array_to_string(fi.tags, ' ') ILIKE ANY(%s))")
+        params: list = [patterns, patterns, patterns]
+        if asset_type is not None:
+            sql += " AND a.asset_type = %s"
+            params.append(asset_type)
+        sql += " LIMIT %s"
+        params.append(limit)
+        out = []
+        for r in self._all(sql, tuple(params)):
+            out.append((Asset(asset_type=r["asset_type"], created_by=r["created_by"],
+                              id=r["id"], lifecycle=Lifecycle(r["lifecycle"]),
+                              origin=r["origin"], created_at=r["created_at"]),
+                        IdentityFacet(asset_id=r["asset_id"], display_name=r["display_name"],
+                                      taxonomy=r["taxonomy"], status=r["status"],
+                                      tags=list(r["tags"]), attributes=r["attributes"])))
+        return out
 
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
         row = self._one("SELECT * FROM facet_identity WHERE asset_id = %s", (asset_id,))

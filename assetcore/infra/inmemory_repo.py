@@ -8,7 +8,7 @@ PHASE1 decision #4 — the invariant lives at the storage boundary, not in the v
 """
 from uuid import UUID
 
-from assetcore.core.rules import demote_latest
+from assetcore.core.rules import demote_latest, is_similarity_candidate
 from assetcore.core.entities import (
     Asset,
     Event,
@@ -64,6 +64,21 @@ class InMemoryRepo:
         wanted = set(asset_ids)
         return {v.asset_id: v for v in self.runtimes
                 if v.asset_id in wanted and v.is_latest}
+
+    def search_candidates(self, query: str, asset_type: str | None = None,
+                          limit: int = 200) -> list[tuple[Asset, IdentityFacet]]:
+        # the direct evaluation of the narrowing contract (rules.is_similarity_candidate);
+        # SQL backends answer the same question through an index.
+        out = []
+        for a in self.assets.values():
+            if asset_type is not None and a.asset_type != asset_type:
+                continue
+            identity = self._identities.get(a.id)
+            if is_similarity_candidate(query, identity):
+                out.append((a, identity))
+                if len(out) >= limit:
+                    break
+        return out
 
     def save_identity(self, identity: IdentityFacet) -> None:
         self._identities[identity.asset_id] = identity
