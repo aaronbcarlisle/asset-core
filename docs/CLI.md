@@ -28,6 +28,7 @@ Run as the installed console script `assetcore …`, or `python -m assetcore.sdk
 | `impact <id>` / `dependents <id> [--rel-types a,b] [--depth N]` | open | what breaks if I touch this |
 | `dependencies <id> [...]` | open | what this is built from |
 | `used-by <id>` · `lineage <id>` | open | one-hop consumers / provenance |
+| `history <id> [--facet source\|runtime]` | open | a facet's full version history (ascending) |
 | `stale-derivations <id>` | open | DERIVED_FROM edges whose source advanced |
 | `floating <id>` | open | DEPENDS_ON edges still floating (pin before ship) |
 | `find-similar <name> [--type]` | open | reuse-over-rebuild nudge (advisory) |

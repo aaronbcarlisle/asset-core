@@ -131,6 +131,10 @@ def build_parser() -> argparse.ArgumentParser:
         g.add_argument("--rel-types", default=None, dest="rel_types")
         g.add_argument("--depth", type=int, default=None)
 
+    g = add("history", help="a facet's full version history (ascending)")
+    g.add_argument("asset_id")
+    g.add_argument("--facet", choices=["source", "runtime"], default="source")
+
     add("used-by", help="direct consumers (one hop)").add_argument("asset_id")
     add("lineage", help="what this derives from / instances").add_argument("asset_id")
     add("stale-derivations", help="DERIVED_FROM edges whose source advanced").add_argument("asset_id")
@@ -216,6 +220,16 @@ def run(args, client: AssetcoreClient) -> int:
         rel = _csv(args.rel_types)
         nodes = client.dependencies(args.asset_id, rel, args.depth)
         _out(args, nodes, f"{len(nodes)} dependencies:\n" + "\n".join(_node_line(n) for n in nodes))
+    elif cmd == "history":
+        if args.facet == "runtime":
+            versions = client.runtime_versions(args.asset_id)
+            lines = [f"  v{v['version_num']:<3} {v['location_uri']} (build {v['build_id']})"
+                     f"{'  <-latest' if v['is_latest'] else ''}" for v in versions]
+        else:
+            versions = client.source_versions(args.asset_id)
+            lines = [f"  v{v['version_num']:<3} {v['tool']} {v['location_uri']} (rev {v['revision']})"
+                     f"{'  <-latest' if v['is_latest'] else ''}" for v in versions]
+        _out(args, versions, f"{len(versions)} {args.facet} version(s):\n" + "\n".join(lines))
     elif cmd == "used-by":
         rels = client.used_by(args.asset_id)
         _out(args, rels, "\n".join(_rel_line(r) for r in rels) or "  (none)")

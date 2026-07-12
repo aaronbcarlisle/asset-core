@@ -191,6 +191,22 @@ async def bind_source(asset_id: UUID, body: BindSourceRequest,
     return VersionResponse(version=v)
 
 
+@router.get("/assets/{asset_id}/source/versions", response_model=list[SourceOut])
+async def source_versions(asset_id: UUID,
+                          service: AssetcoreService = Depends(get_service)) -> list[SourceOut]:
+    """Full source version history (ascending), newest reachable via is_latest."""
+    _require_asset(service, asset_id)
+    return [SourceOut.model_validate(v) for v in service.source_versions(asset_id)]
+
+
+@router.get("/assets/{asset_id}/runtime/versions", response_model=list[RuntimeOut])
+async def runtime_versions(asset_id: UUID,
+                           service: AssetcoreService = Depends(get_service)) -> list[RuntimeOut]:
+    """Full runtime version history (ascending)."""
+    _require_asset(service, asset_id)
+    return [RuntimeOut.model_validate(v) for v in service.runtime_versions(asset_id)]
+
+
 @router.post("/assets/{asset_id}/runtime", response_model=VersionResponse)
 async def bind_runtime(asset_id: UUID, body: BindRuntimeRequest,
                        service: AssetcoreService = Depends(get_service),

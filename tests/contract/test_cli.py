@@ -45,6 +45,20 @@ def test_declare_origin_and_claim_attrs(make_client, capsys):
     assert ident["attributes"] == {"biome": "harbor", "reusable": "yes"}
 
 
+def test_history_lists_source_versions(make_client, capsys):
+    artist = make_client("artist-token")
+    aid = artist.declare("prop", "amy")
+    artist.bind_source(aid, "//d/a_v1.ma", "maya", "1", "amy")
+    artist.bind_source(aid, "//d/a_v2.ma", "maya", "2", "amy")
+    code, out = call(artist, "--json", "history", aid, capsys=capsys)
+    assert code == 0
+    versions = json.loads(out)
+    assert [v["version_num"] for v in versions] == [1, 2]
+    # human output marks the latest
+    code, out = call(artist, "history", aid, capsys=capsys)
+    assert code == 0 and "<-latest" in out
+
+
 def test_declare_resolve_relate_impact(make_client, capsys):
     artist = make_client("artist-token")
 

@@ -121,6 +121,14 @@ class AssetcoreClient:
     def get_source(self, asset_id: str) -> dict | None:
         return self.resolve(asset_id).get("source")
 
+    def source_versions(self, asset_id: str) -> list[dict]:
+        """Full source version history (ascending)."""
+        return self._get(f"/assets/{asset_id}/source/versions").json()
+
+    def runtime_versions(self, asset_id: str) -> list[dict]:
+        """Full runtime version history (ascending)."""
+        return self._get(f"/assets/{asset_id}/runtime/versions").json()
+
     def resolve_dependency(self, from_asset: str, to_asset: str) -> dict | None:
         return self._get("/dependency", {"frm": from_asset, "to": to_asset}).json()
 

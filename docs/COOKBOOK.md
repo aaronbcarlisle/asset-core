@@ -181,6 +181,18 @@ curl -s localhost:8000/assets/<id>            # open — no token needed
 
 A resolve of an unknown id → **404** over HTTP (`meta` is `None` in-process).
 
+`resolve` returns only the *latest* source/runtime. For the full history:
+
+```python
+c.source_versions(aid)   # [{version_num, location_uri, tool, revision, is_latest}, …] ascending
+c.runtime_versions(aid)  # [{version_num, location_uri, build_id, is_latest}, …]
+```
+```bash
+assetcore history <id>                 # source history (default)
+assetcore history <id> --facet runtime
+curl -s localhost:8000/assets/<id>/source/versions
+```
+
 ### Claim
 
 Production gives a provisional asset meaning — the backfill step. Sets

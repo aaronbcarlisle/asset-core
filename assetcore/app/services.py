@@ -143,6 +143,12 @@ class AssetcoreService:
     def resolve_dependency(self, frm: UUID, to: UUID) -> SourceVersion | None:
         return verbs.resolve_dependency(self.repo, frm, to)
 
+    def source_versions(self, asset_id: UUID) -> list[SourceVersion]:
+        return self.repo.source_versions(asset_id)
+
+    def runtime_versions(self, asset_id: UUID):
+        return self.repo.runtime_versions(asset_id)
+
     def used_by(self, asset_id: UUID) -> list[Relationship]:
         return verbs.used_by(self.repo, asset_id)
 

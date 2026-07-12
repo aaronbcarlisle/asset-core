@@ -30,6 +30,31 @@ def test_dependents_bad_rel_type_is_400(make_client):
     assert exc.value.response.status_code == 400
 
 
+def test_source_and_runtime_version_history(make_client):
+    artist = make_client("artist-token")
+    engine = make_client("engine-token")
+    a = artist.declare("prop", "amy")
+    artist.bind_source(a, "//d/a_v1.ma", "maya", "1", "amy")
+    artist.bind_source(a, "//d/a_v2.ma", "maya", "2", "amy")
+    engine.bind_runtime(a, "/Game/a", "build-1")
+
+    src = artist.source_versions(a)
+    assert [v["version_num"] for v in src] == [1, 2]              # ascending history
+    assert [v["is_latest"] for v in src] == [False, True]        # one latest, the newest
+    assert src[0]["location_uri"] == "//d/a_v1.ma"
+
+    rt = artist.runtime_versions(a)
+    assert [v["version_num"] for v in rt] == [1] and rt[0]["is_latest"] is True
+
+
+def test_version_history_unknown_asset_is_404(make_client):
+    import httpx
+    c = make_client("artist-token")
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        c.source_versions("00000000-0000-0000-0000-000000000000")
+    assert exc.value.response.status_code == 404
+
+
 def test_relate_pin_without_version_is_400(make_client):
     c = make_client("artist-token")
     a = c.declare("anim", "amy")
