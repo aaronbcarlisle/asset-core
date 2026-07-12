@@ -12,6 +12,7 @@ import time
 import uuid
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 logger = logging.getLogger("assetcore.service")
 
@@ -72,6 +73,18 @@ def create_app(
         logger.info("request method=%s path=%s status=%s duration_ms=%.1f request_id=%s",
                     request.method, request.url.path, response.status_code, elapsed_ms, request_id)
         return response
+
+    @app.exception_handler(Exception)
+    async def _unhandled(request: Request, exc: Exception) -> JSONResponse:
+        # Handled errors (HTTPException/validation) already flow back through the
+        # middleware with an X-Request-ID; this catches the UNHANDLED case so a 500
+        # also carries the id and gets logged, instead of escaping above the
+        # middleware with neither.
+        request_id = getattr(request.state, "request_id", None)
+        logger.exception("unhandled error method=%s path=%s request_id=%s",
+                         request.method, request.url.path, request_id)
+        return JSONResponse(status_code=500, content={"detail": "internal server error"},
+                            headers={"X-Request-ID": request_id} if request_id else None)
 
     app.include_router(router)
     return app

@@ -117,6 +117,27 @@ def test_response_carries_request_id(client):
     assert r2.headers["X-Request-ID"] == "trace-abc"
 
 
+def test_request_id_present_on_handled_and_unhandled_errors():
+    from fastapi.testclient import TestClient
+    from assetcore.infra.broadcast_sink import BroadcastSink
+    from assetcore.infra.sqlite_repo import SqliteRepo
+    from assetcore.service.app import create_app
+
+    app = create_app(repo=SqliteRepo(":memory:", check_same_thread=False), sink=BroadcastSink())
+
+    @app.get("/_boom")
+    async def _boom():                      # simulate an UNHANDLED error path
+        raise RuntimeError("kaboom")
+
+    tc = TestClient(app, raise_server_exceptions=False)
+    # handled 404 already carried the id; the unhandled 500 must too (+ be a clean body)
+    assert tc.get("/assets/00000000-0000-0000-0000-000000000000").headers.get("X-Request-ID")
+    boom = tc.get("/_boom")
+    assert boom.status_code == 500
+    assert boom.headers.get("X-Request-ID")
+    assert boom.json()["detail"] == "internal server error"
+
+
 def test_claim_requires_production(client):
     aid = _declare(client)
     forbidden = client.post(f"/assets/{aid}/claim",
