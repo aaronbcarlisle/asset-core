@@ -101,7 +101,8 @@ class AssetcoreClient:
         return self._get(f"/assets/{asset_id}").json()
 
     def list_assets(self, created_by: str | None = None, taxonomy_prefix: str | None = None,
-                    updated_since: str | None = None) -> list[dict]:
+                    updated_since: str | None = None, limit: int | None = None,
+                    offset: int | None = None) -> list[dict]:
         params: dict[str, Any] = {}
         if created_by is not None:
             params["created_by"] = created_by
@@ -109,6 +110,10 @@ class AssetcoreClient:
             params["taxonomy_prefix"] = taxonomy_prefix
         if updated_since is not None:
             params["updated_since"] = updated_since
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
         return self._get("/assets", params if params else None).json()
 
     def get_source(self, asset_id: str) -> dict | None:
@@ -129,8 +134,14 @@ class AssetcoreClient:
             params["asset_type"] = asset_type
         return self._get("/similar", params).json()
 
-    def backfill_worklist(self) -> list[dict]:
-        return self._get("/worklist/provisional").json()
+    def backfill_worklist(self, limit: int | None = None,
+                          offset: int | None = None) -> list[dict]:
+        params: dict[str, Any] = {}
+        if limit is not None:
+            params["limit"] = limit
+        if offset is not None:
+            params["offset"] = offset
+        return self._get("/worklist/provisional", params or None).json()
 
     def floating_dependencies(self, asset_id: str) -> list[dict]:
         return self._get(f"/assets/{asset_id}/floating-dependencies").json()

@@ -317,11 +317,17 @@ def find_similar(repo: AssetRepo, name: str, asset_type: str | None = None,
 # ---------------------------------------------------------------------------
 # BACKFILL_WORKLIST — the provisional queue Production grooms (oldest first).
 # ---------------------------------------------------------------------------
-def backfill_worklist(repo: AssetRepo) -> list[tuple]:
-    """Provisional assets awaiting a claim, with their birth context. (asset, identity)."""
+def backfill_worklist(repo: AssetRepo, limit: int | None = None, offset: int = 0) -> list[tuple]:
+    """Provisional assets awaiting a claim, with their birth context. (asset, identity).
+
+    Oldest first (groom the tail). `limit`/`offset` page the queue; identities are
+    batch-fetched for the returned page (no per-asset N+1).
+    """
     provisional = repo.list_assets(lifecycle=Lifecycle.PROVISIONAL)
-    provisional.sort(key=lambda a: a.created_at)          # oldest first: groom the tail
-    return [(a, repo.get_identity(a.id)) for a in provisional]
+    provisional.sort(key=lambda a: (a.created_at, str(a.id)))   # oldest first, stable
+    page = provisional[offset:] if limit is None else provisional[offset:offset + limit]
+    idents = repo.identities([a.id for a in page])
+    return [(a, idents.get(a.id)) for a in page]
 
 
 # ---------------------------------------------------------------------------

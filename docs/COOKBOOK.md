@@ -474,11 +474,17 @@ oldest first, with their birth context.
 ```python
 svc.backfill_worklist()             # [(asset, identity), …]
 c.backfill_worklist()               # [{id, asset_type, created_by, created_at, origin, …}]
+c.backfill_worklist(limit=100, offset=0)   # paged
 ```
 
 ```bash
 assetcore worklist
 ```
+
+Both `worklist` and `list_assets` (`GET /assets`) page with `limit` (default 500,
+max 5000) + `offset`, in a stable `(created_at, id)` order. The service resolves a
+whole page with a fixed number of queries (batch identity/source/runtime lookups),
+so listing stays flat as the catalog grows — no per-asset round-trips.
 
 ### Bulk operations
 

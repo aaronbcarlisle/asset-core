@@ -25,7 +25,7 @@ class InMemoryRepo:
 
     def __init__(self) -> None:
         self.assets: dict[UUID, Asset] = {}
-        self.identities: dict[UUID, IdentityFacet] = {}
+        self._identities: dict[UUID, IdentityFacet] = {}
         self.sources: list[SourceVersion] = []
         self.runtimes: list[RuntimeVersion] = []
         self.rels: list[Relationship] = []
@@ -33,24 +33,40 @@ class InMemoryRepo:
     # --- identity ---
     def create_asset(self, asset: Asset, identity: IdentityFacet) -> None:
         self.assets[asset.id] = asset
-        self.identities[identity.asset_id] = identity
+        self._identities[identity.asset_id] = identity
 
     def get_asset(self, asset_id: UUID) -> Asset | None:
         return self.assets.get(asset_id)
 
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
-        return self.identities.get(asset_id)
+        return self._identities.get(asset_id)
 
     def list_assets(self, asset_type: str | None = None,
-                    lifecycle: Lifecycle | None = None) -> list[Asset]:
+                    lifecycle: Lifecycle | None = None,
+                    created_by: str | None = None) -> list[Asset]:
         return [
             a for a in self.assets.values()
             if (asset_type is None or a.asset_type == asset_type)
             and (lifecycle is None or a.lifecycle == lifecycle)
+            and (created_by is None or a.created_by == created_by)
         ]
 
+    def identities(self, asset_ids: list[UUID]) -> dict[UUID, IdentityFacet]:
+        wanted = set(asset_ids)
+        return {aid: ident for aid, ident in self._identities.items() if aid in wanted}
+
+    def latest_sources(self, asset_ids: list[UUID]) -> dict[UUID, SourceVersion]:
+        wanted = set(asset_ids)
+        return {v.asset_id: v for v in self.sources
+                if v.asset_id in wanted and v.is_latest}
+
+    def latest_runtimes(self, asset_ids: list[UUID]) -> dict[UUID, RuntimeVersion]:
+        wanted = set(asset_ids)
+        return {v.asset_id: v for v in self.runtimes
+                if v.asset_id in wanted and v.is_latest}
+
     def save_identity(self, identity: IdentityFacet) -> None:
-        self.identities[identity.asset_id] = identity
+        self._identities[identity.asset_id] = identity
 
     def set_lifecycle(self, asset_id: UUID, lifecycle: Lifecycle) -> None:
         self.assets[asset_id].lifecycle = lifecycle

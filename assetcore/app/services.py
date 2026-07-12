@@ -87,25 +87,36 @@ class AssetcoreService:
         return verbs.resolve(self.repo, asset_id)
 
     def list_assets(self, created_by: str | None = None, taxonomy_prefix: str | None = None,
-                    updated_since: datetime | None = None) -> list[dict]:
+                    updated_since: datetime | None = None,
+                    limit: int | None = None, offset: int = 0) -> list[dict]:
+        """List assets with scope filters + pagination.
+
+        `created_by` is pushed down to the repo; `taxonomy_prefix`/`updated_since`
+        are applied over batch-fetched identities/facets (one query each — no N+1).
+        Results are ordered by (created_at, id) for stable pagination, then sliced
+        by offset/limit. `source` for the returned page is filled from the batch map.
+        """
         threshold = updated_since
         if threshold is not None and threshold.tzinfo is None:
             threshold = threshold.replace(tzinfo=timezone.utc)
 
-        items = []
-        for asset in self.repo.list_assets():
-            if created_by is not None and asset.created_by != created_by:
-                continue
+        assets = self.repo.list_assets(created_by=created_by)
+        ids = [a.id for a in assets]
+        identities = self.repo.identities(ids)
+        # only need facet timestamps for updated_since; fetch once for all candidates
+        sources = self.repo.latest_sources(ids)
+        runtimes = self.repo.latest_runtimes(ids) if threshold is not None else {}
 
-            identity = self.repo.get_identity(asset.id)
+        filtered = []
+        for asset in assets:
+            identity = identities.get(asset.id)
             if taxonomy_prefix is not None:
                 taxonomy = identity.taxonomy if identity is not None else None
                 if taxonomy is None or not taxonomy.startswith(taxonomy_prefix):
                     continue
-
-            source = next((v for v in self.repo.source_versions(asset.id) if v.is_latest), None)
-            runtime = next((v for v in self.repo.runtime_versions(asset.id) if v.is_latest), None)
             if threshold is not None:
+                source = sources.get(asset.id)
+                runtime = runtimes.get(asset.id)
                 latest_touch = max(
                     [asset.created_at]
                     + ([source.published_at] if source is not None else [])
@@ -113,17 +124,20 @@ class AssetcoreService:
                 )
                 if latest_touch < threshold:
                     continue
+            filtered.append(asset)
 
-            items.append({
-                "id": asset.id,
-                "asset_type": asset.asset_type,
-                "created_by": asset.created_by,
-                "created_at": asset.created_at,
-                "meta": asset,
-                "identity": identity,
-                "source": source,
-            })
-        return items
+        filtered.sort(key=lambda a: (a.created_at, str(a.id)))   # stable pagination order
+        page = filtered[offset:] if limit is None else filtered[offset:offset + limit]
+
+        return [{
+            "id": asset.id,
+            "asset_type": asset.asset_type,
+            "created_by": asset.created_by,
+            "created_at": asset.created_at,
+            "meta": asset,
+            "identity": identities.get(asset.id),
+            "source": sources.get(asset.id),
+        } for asset in page]
 
     def resolve_dependency(self, frm: UUID, to: UUID) -> SourceVersion | None:
         return verbs.resolve_dependency(self.repo, frm, to)
@@ -137,8 +151,8 @@ class AssetcoreService:
     def find_similar(self, name: str, asset_type: str | None = None, limit: int = 10) -> list[tuple]:
         return verbs.find_similar(self.repo, name, asset_type, limit)
 
-    def backfill_worklist(self) -> list[tuple]:
-        return verbs.backfill_worklist(self.repo)
+    def backfill_worklist(self, limit: int | None = None, offset: int = 0) -> list[tuple]:
+        return verbs.backfill_worklist(self.repo, limit=limit, offset=offset)
 
     def floating_dependencies(self, asset_id: UUID) -> list[Relationship]:
         return verbs.floating_dependencies(self.repo, asset_id)
@@ -170,16 +184,13 @@ class AssetcoreService:
         return verbs.bulk_relocate(self.repo, self.sink, moves)
 
     def metrics(self, now: datetime) -> dict:
-        # NOTE: per-asset source/runtime lookups are O(n) round-trips on SQL
-        # backends. Acceptable for now (scrape interval >> asset churn); a
-        # repo-level COUNT(*)...GROUP BY coverage query is the future optimization
-        # if /metrics scraping ever dominates load (PR #8 review thread).
+        # Coverage via two batch queries (latest source/runtime maps), not a
+        # per-asset round-trip — /metrics stays cheap as the catalog grows.
         assets = self.repo.list_assets()
+        ids = [a.id for a in assets]
         total = len(assets)
-        with_source = sum(1 for a in assets
-                          if any(v.is_latest for v in self.repo.source_versions(a.id)))
-        with_runtime = sum(1 for a in assets
-                           if any(v.is_latest for v in self.repo.runtime_versions(a.id)))
+        with_source = len(self.repo.latest_sources(ids))
+        with_runtime = len(self.repo.latest_runtimes(ids))
         ages = observability.provisional_ages_seconds(assets, now)
         return {
             "assets_total": total,

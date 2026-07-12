@@ -13,7 +13,7 @@ and non-blocking enough for this service's scale.
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from assetcore.app.services import AssetcoreService, DeclareConflict
@@ -99,12 +99,16 @@ async def list_assets(
     created_by: str | None = None,
     taxonomy_prefix: str | None = None,
     updated_since: datetime | None = None,
+    limit: int = Query(default=500, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
     service: AssetcoreService = Depends(get_service),
 ) -> list[AssetSummaryOut]:
     assets = service.list_assets(
         created_by=created_by,
         taxonomy_prefix=taxonomy_prefix,
         updated_since=updated_since,
+        limit=limit,
+        offset=offset,
     )
     return [
         AssetSummaryOut(
@@ -289,7 +293,11 @@ async def find_similar(name: str, asset_type: str | None = None,
 
 
 @router.get("/worklist/provisional", response_model=list[WorklistItem])
-async def backfill_worklist(service: AssetcoreService = Depends(get_service)) -> list[WorklistItem]:
+async def backfill_worklist(
+    limit: int = Query(default=500, ge=1, le=5000),
+    offset: int = Query(default=0, ge=0),
+    service: AssetcoreService = Depends(get_service),
+) -> list[WorklistItem]:
     """The provisional backfill queue Production grooms (oldest first)."""
     return [
         WorklistItem(
@@ -297,7 +305,7 @@ async def backfill_worklist(service: AssetcoreService = Depends(get_service)) ->
             created_at=asset.created_at.isoformat(), origin=asset.origin,
             display_name=identity.display_name if identity else None,
         )
-        for asset, identity in service.backfill_worklist()
+        for asset, identity in service.backfill_worklist(limit=limit, offset=offset)
     ]
 
 

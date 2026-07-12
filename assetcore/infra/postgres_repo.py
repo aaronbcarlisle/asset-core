@@ -87,7 +87,8 @@ class PostgresRepo:
         )
 
     def list_assets(self, asset_type: str | None = None,
-                    lifecycle: Lifecycle | None = None) -> list[Asset]:
+                    lifecycle: Lifecycle | None = None,
+                    created_by: str | None = None) -> list[Asset]:
         sql, params = "SELECT * FROM asset", []
         clauses = []
         if asset_type is not None:
@@ -96,6 +97,9 @@ class PostgresRepo:
         if lifecycle is not None:
             clauses.append("lifecycle = %s")
             params.append(Lifecycle(lifecycle).value)
+        if created_by is not None:
+            clauses.append("created_by = %s")
+            params.append(created_by)
         if clauses:
             sql += " WHERE " + " AND ".join(clauses)
         return [
@@ -105,6 +109,39 @@ class PostgresRepo:
             )
             for r in self._all(sql, tuple(params))
         ]
+
+    def identities(self, asset_ids: list[UUID]) -> dict[UUID, IdentityFacet]:
+        if not asset_ids:
+            return {}
+        rows = self._all(
+            "SELECT * FROM facet_identity WHERE asset_id = ANY(%s)", (list(asset_ids),))
+        return {r["asset_id"]: IdentityFacet(
+            asset_id=r["asset_id"], display_name=r["display_name"], taxonomy=r["taxonomy"],
+            status=r["status"], tags=list(r["tags"]), attributes=r["attributes"],
+        ) for r in rows}
+
+    def latest_sources(self, asset_ids: list[UUID]) -> dict[UUID, SourceVersion]:
+        if not asset_ids:
+            return {}
+        rows = self._all(
+            "SELECT * FROM facet_source_version WHERE is_latest AND asset_id = ANY(%s)",
+            (list(asset_ids),))
+        return {r["asset_id"]: SourceVersion(
+            asset_id=r["asset_id"], location_uri=r["location_uri"], tool=r["tool"],
+            revision=r["revision"], version_num=r["version_num"], is_latest=r["is_latest"],
+            published_by=r["published_by"], published_at=r["published_at"],
+        ) for r in rows}
+
+    def latest_runtimes(self, asset_ids: list[UUID]) -> dict[UUID, RuntimeVersion]:
+        if not asset_ids:
+            return {}
+        rows = self._all(
+            "SELECT * FROM facet_runtime_version WHERE is_latest AND asset_id = ANY(%s)",
+            (list(asset_ids),))
+        return {r["asset_id"]: RuntimeVersion(
+            asset_id=r["asset_id"], location_uri=r["location_uri"], build_id=r["build_id"],
+            version_num=r["version_num"], is_latest=r["is_latest"], cooked_at=r["cooked_at"],
+        ) for r in rows}
 
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
         row = self._one("SELECT * FROM facet_identity WHERE asset_id = %s", (asset_id,))
