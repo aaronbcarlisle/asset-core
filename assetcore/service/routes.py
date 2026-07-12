@@ -104,7 +104,7 @@ async def metrics(request: Request, service: AssetcoreService = Depends(get_serv
 # --- identity lifecycle -----------------------------------------------------
 @router.post("/assets", response_model=DeclareResponse, status_code=201)
 async def declare(body: DeclareRequest, response: Response, service: AssetcoreService = Depends(get_service),
-                  _: str = Depends(auth.require(auth.ARTIST, auth.ENGINE)),
+                  _: auth.AuthContext = Depends(auth.require(auth.ARTIST, auth.ENGINE)),
                   run=Depends(get_run)) -> DeclareResponse:
     try:
         result = await run(service.declare, body.asset_type, body.created_by, body.origin,
@@ -165,11 +165,12 @@ async def resolve(asset_id: UUID, service: AssetcoreService = Depends(get_servic
 
 @router.post("/assets/{asset_id}/claim", status_code=204)
 async def claim(asset_id: UUID, body: ClaimRequest, service: AssetcoreService = Depends(get_service),
-                _: str = Depends(auth.require(auth.PRODUCTION)),
+                ctx: auth.AuthContext = Depends(auth.require(auth.PRODUCTION)),
                 run=Depends(get_run)) -> Response:
     await run(_require_asset, service, asset_id)
     try:
-        await run(service.claim, asset_id, body.display_name, body.taxonomy, body.actor,
+        await run(service.claim, asset_id, body.display_name, body.taxonomy,
+                  auth.resolve_actor(ctx, body.actor),
                   reactivate=body.reactivate, attributes=body.attributes)
     except ValueError as exc:   # claiming a deprecated asset without reactivate=True
         raise HTTPException(status_code=409, detail=str(exc)) from exc
@@ -178,24 +179,25 @@ async def claim(asset_id: UUID, body: ClaimRequest, service: AssetcoreService = 
 
 @router.post("/assets/{asset_id}/rename", status_code=204)
 async def rename(asset_id: UUID, body: RenameRequest, service: AssetcoreService = Depends(get_service),
-                 _: str = Depends(auth.require(auth.PRODUCTION)),
+                 ctx: auth.AuthContext = Depends(auth.require(auth.PRODUCTION)),
                  run=Depends(get_run)) -> Response:
     await run(_require_asset, service, asset_id)
-    await run(service.rename, asset_id, body.new_name, body.actor, body.new_taxonomy)
+    await run(service.rename, asset_id, body.new_name,
+              auth.resolve_actor(ctx, body.actor), body.new_taxonomy)
     return Response(status_code=204)
 
 
 @router.post("/assets/{asset_id}/relocate", status_code=204)
 async def relocate(asset_id: UUID, body: RelocateRequest,
                    service: AssetcoreService = Depends(get_service),
-                   _: str = Depends(auth.get_authority),
+                   ctx: auth.AuthContext = Depends(auth.get_authority),
                    run=Depends(get_run)) -> Response:
     """Move the BYTES (a p4 move / reorg): same identity + version + edges, new
     location. Any authenticated authority; the actor is recorded."""
     await run(_require_asset, service, asset_id)
     try:
-        await run(service.relocate, asset_id, body.new_location_uri, body.actor,
-                  body.facet, body.new_revision)
+        await run(service.relocate, asset_id, body.new_location_uri,
+                  auth.resolve_actor(ctx, body.actor), body.facet, body.new_revision)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(status_code=204)
@@ -204,10 +206,10 @@ async def relocate(asset_id: UUID, body: RelocateRequest,
 @router.post("/assets/{asset_id}/deprecate", status_code=204)
 async def deprecate(asset_id: UUID, body: DeprecateRequest,
                     service: AssetcoreService = Depends(get_service),
-                    _: str = Depends(auth.require(auth.PRODUCTION)),
+                    ctx: auth.AuthContext = Depends(auth.require(auth.PRODUCTION)),
                     run=Depends(get_run)) -> Response:
     await run(_require_asset, service, asset_id)
-    await run(service.deprecate, asset_id, body.actor)
+    await run(service.deprecate, asset_id, auth.resolve_actor(ctx, body.actor))
     return Response(status_code=204)
 
 
@@ -215,12 +217,12 @@ async def deprecate(asset_id: UUID, body: DeprecateRequest,
 @router.post("/assets/{asset_id}/source", response_model=VersionResponse)
 async def bind_source(asset_id: UUID, body: BindSourceRequest,
                       service: AssetcoreService = Depends(get_service),
-                      _: str = Depends(auth.require(auth.ARTIST)),
+                      ctx: auth.AuthContext = Depends(auth.require(auth.ARTIST)),
                       run=Depends(get_run)) -> VersionResponse:
     await run(_require_asset, service, asset_id)
     try:
         v = await run(service.bind_source, asset_id, body.location_uri, body.tool,
-                      body.revision, body.published_by)
+                      body.revision, auth.resolve_actor(ctx, body.published_by))
     except VersionConflict as exc:   # lost the version race past the retry budget -> retryable
         raise HTTPException(status_code=503, detail=str(exc),
                             headers={"Retry-After": "1"}) from exc
@@ -248,10 +250,10 @@ async def runtime_versions(asset_id: UUID,
 @router.post("/assets/{asset_id}/runtime", response_model=VersionResponse)
 async def bind_runtime(asset_id: UUID, body: BindRuntimeRequest,
                        service: AssetcoreService = Depends(get_service),
-                       authority: str = Depends(auth.require(auth.ENGINE, auth.BUILD)),
+                       ctx: auth.AuthContext = Depends(auth.require(auth.ENGINE, auth.BUILD)),
                        run=Depends(get_run)) -> VersionResponse:
     await run(_require_asset, service, asset_id)
-    actor = body.actor if body.actor is not None else authority
+    actor = auth.resolve_actor(ctx, body.actor)
     try:
         v = await run(service.bind_runtime, asset_id, body.location_uri, body.build_id, actor)
     except VersionConflict as exc:   # lost the version race past the retry budget -> retryable
@@ -263,11 +265,11 @@ async def bind_runtime(asset_id: UUID, body: BindRuntimeRequest,
 # --- relationships ----------------------------------------------------------
 @router.post("/relate", status_code=204)
 async def relate(body: RelateRequest, service: AssetcoreService = Depends(get_service),
-                 authority: str = Depends(auth.get_authority),
+                 ctx: auth.AuthContext = Depends(auth.get_authority),
                  run=Depends(get_run)) -> Response:
-    # the token authority gates access; the recorded actor is the caller-supplied
-    # one (falling back to the authority only when omitted).
-    actor = body.actor if body.actor is not None else authority
+    # a verified subject (jwt) is recorded as the actor; otherwise the
+    # caller-supplied one, falling back to the authority when omitted.
+    actor = auth.resolve_actor(ctx, body.actor)
     try:
         await run(service.relate, body.from_asset, body.to_asset, body.rel_type, actor,
                   body.binding_mode, body.pinned_version)
@@ -278,9 +280,9 @@ async def relate(body: RelateRequest, service: AssetcoreService = Depends(get_se
 
 @router.post("/set_binding", status_code=204)
 async def set_binding(body: SetBindingRequest, service: AssetcoreService = Depends(get_service),
-                      authority: str = Depends(auth.get_authority),
+                      ctx: auth.AuthContext = Depends(auth.get_authority),
                       run=Depends(get_run)) -> Response:
-    actor = body.actor if body.actor is not None else authority
+    actor = auth.resolve_actor(ctx, body.actor)
     try:
         await run(service.set_binding, body.from_asset, body.to_asset, body.binding_mode,
                   body.pinned_version, actor)
@@ -394,7 +396,7 @@ async def floating_dependencies(asset_id: UUID,
 # --- bulk (the 100s-of-assets reality) --------------------------------------
 @router.post("/bulk/declare", response_model=BulkDeclareResponse, status_code=201)
 async def bulk_declare(body: BulkDeclareRequest, service: AssetcoreService = Depends(get_service),
-                       _: str = Depends(auth.require(auth.ARTIST, auth.ENGINE)),
+                       _: auth.AuthContext = Depends(auth.require(auth.ARTIST, auth.ENGINE)),
                        run=Depends(get_run)) -> BulkDeclareResponse:
     ids = await run(service.bulk_declare, [s.model_dump() for s in body.specs])
     return BulkDeclareResponse(ids=ids)
@@ -402,10 +404,10 @@ async def bulk_declare(body: BulkDeclareRequest, service: AssetcoreService = Dep
 
 @router.post("/bulk/relate", response_model=BulkCountResponse)
 async def bulk_relate(body: BulkRelateRequest, service: AssetcoreService = Depends(get_service),
-                      authority: str = Depends(auth.get_authority),
+                      ctx: auth.AuthContext = Depends(auth.get_authority),
                       run=Depends(get_run)) -> BulkCountResponse:
     edges = [{"frm": e.from_asset, "to": e.to_asset, "rel_type": e.rel_type,
-              "actor": e.actor if e.actor is not None else authority,
+              "actor": auth.resolve_actor(ctx, e.actor),
               "binding_mode": e.binding_mode, "pinned_version": e.pinned_version}
              for e in body.edges]
     try:
@@ -417,10 +419,12 @@ async def bulk_relate(body: BulkRelateRequest, service: AssetcoreService = Depen
 
 @router.post("/bulk/relocate", response_model=BulkCountResponse)
 async def bulk_relocate(body: BulkRelocateRequest, service: AssetcoreService = Depends(get_service),
-                        _: str = Depends(auth.get_authority),
+                        ctx: auth.AuthContext = Depends(auth.get_authority),
                         run=Depends(get_run)) -> BulkCountResponse:
+    moves = [{**m.model_dump(), "actor": auth.resolve_actor(ctx, m.actor)}
+             for m in body.moves]
     try:
-        n = await run(service.bulk_relocate, [m.model_dump() for m in body.moves])
+        n = await run(service.bulk_relocate, moves)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return BulkCountResponse(count=n)

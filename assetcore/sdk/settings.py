@@ -35,6 +35,7 @@ _SECTIONS: dict[str, str] = {
     "trackers": "tracker",
     "repos": "repo",
     "sinks": "sink",
+    "auth": "auth",
     "source_vcs": "source_vcs",
     "runtime_store": "runtime_store",
 }
@@ -111,6 +112,9 @@ class Settings:
 
     def sink(self, instance: str = "main"):
         return self._get("sinks", instance)
+
+    def auth(self, instance: str = "main"):
+        return self._get("auth", instance)
 
     def has_section(self, section: str) -> bool:
         """True when the config declares `section` (e.g. optional [sinks.*])."""

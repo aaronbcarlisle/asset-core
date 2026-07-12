@@ -54,19 +54,30 @@ ASSETCORE_DSN=postgresql://user:pass@host/assetcore alembic -c assetcore/db/alem
 > drift. A future cleanup can have `postgres_repo` bootstrap via Alembic so there
 > is a single source.
 
-## Authentication (dev-grade — fail closed in prod)
+## Authentication (pluggable: static tokens or verified JWT)
 
-Auth is a token→authority map (`X-Assetcore-Token` header). The built-in defaults
-(`prod-token`, `artist-token`, `engine-token`, `build-token`) are **well-known dev
-tokens** — convenient locally, dangerous exposed.
+Auth is a config-selected provider (`[auth.main]` in `assetcore.toml`):
+
+**`static` (default)** — a token→authority map (`X-Assetcore-Token` header).
+The built-in defaults (`prod-token`, …) are **well-known dev tokens**:
 
 - Set `ASSETCORE_TOKENS` (JSON `{"<token>": "<authority>"}`) to your real tokens.
-- If it's unset the service logs a loud warning and falls back to the dev tokens.
+- If unset the service logs a loud warning and falls back to the dev tokens.
 - Set `ASSETCORE_REQUIRE_TOKENS=1` to **fail startup** rather than fall back — the
-  production-safe posture (a misconfigured deploy refuses to run with dev tokens).
+  production-safe posture.
 
-Signed identities / real RBAC are out of scope here (they need a studio identity
-decision — OIDC/LDAP); `ASSETCORE_REQUIRE_TOKENS` closes the immediate hole.
+**`jwt` (verified identity)** — `Authorization: Bearer <JWT>` validated for
+signature (shared `secret` or an OIDC `jwks_url`), `issuer`, `audience`, and
+expiry; a configurable roles claim maps onto the four authorities via
+`role_map`. IdP-agnostic (anything that mints a JWT). Needs the `auth` extra
+(`pip install "assetcore[auth]"`). Under jwt the token's `sub` (configurable)
+becomes the **verified actor recorded on writes** — it overrides any
+caller-supplied `actor`/`published_by`, so provenance is proof, not a
+self-reported string. See the commented `[auth.main]` block in `assetcore.toml`.
+
+The permission model stays the four coarse authorities (they mirror facet
+sovereignty — per-asset ACLs would fight it); `role_map` translates your IdP's
+group names onto them.
 
 ## Request correlation
 

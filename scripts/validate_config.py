@@ -20,8 +20,12 @@ from assetcore.sdk.settings import ConfigError, Settings
 
 def _register_all() -> None:
     # importing these runs the @providers.register side-effects
-    import assetcore.infra._providers      # noqa: F401 — repo providers
+    import assetcore.infra._providers      # noqa: F401 — repo + sink providers
     import assetcore.integrations._register  # noqa: F401 — tracker providers
+    try:
+        import assetcore.service.auth      # noqa: F401 — auth providers (static/jwt)
+    except ImportError:
+        pass   # service extra not installed: [auth.*] sections just aren't checked
 
 
 def run(path: str = "assetcore.toml") -> int:

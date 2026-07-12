@@ -240,6 +240,15 @@ without touching the core design:
       `event` table + LISTEN/NOTIFY fan-out) powers `/events` with restart- and
       worker-proof `Last-Event-ID` resume; sinks are config-selected providers
       (`[sinks.main]` in assetcore.toml; `broadcast` stays the in-process default).
+- [x] **Pooled Postgres + non-blocking DB** — `PostgresRepo` checks connections
+      out of a `ThreadedConnectionPool` per call; when both repo and sink declare
+      `SUPPORTS_CONCURRENCY` the service runs DB work in the threadpool, so a slow
+      query no longer blocks the event loop. SQLite keeps its loop-confined model.
+- [x] **Verified identities** — auth is a config-selected provider: `static`
+      (the token map, unchanged default) or `jwt` (signature/issuer/audience
+      validation, roles-claim→authority mapping, and the token subject recorded as
+      the actor on writes — provenance becomes proof). Per-asset ACLs deliberately
+      NOT added (they'd fight facet sovereignty).
 - **API clarity:** the single-file prototype moved to `examples/prototype/` and
   `import assetcore` now surfaces the modern client; the hub CLI moved to L3
   (`sdk/hub_cli.py`) with a 4th import-linter contract forbidding sdk→integrations;

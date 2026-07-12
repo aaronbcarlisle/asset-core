@@ -22,11 +22,12 @@ assetcore = "assetcore.sdk.cli:main"
 [project.optional-dependencies]
 postgres = ["psycopg2-binary>=2.9"]
 service = ["fastapi>=0.110", "uvicorn>=0.27"]   # httpx is a base dep
+auth = ["pyjwt[crypto]>=2.6"]                   # the verified-identity (jwt) auth provider
 migrations = ["alembic>=1.13", "sqlalchemy>=2.0"]
 docs = ["mkdocs-material>=9.5", "mkdocstrings[python]>=0.26"]
 test = ["pytest>=8.0"]
 # everything a contributor needs, composed from the extras above + the firewall linter
-dev = ["assetcore[service,migrations,docs,test]", "import-linter>=2.0"]
+dev = ["assetcore[service,auth,migrations,docs,test]", "import-linter>=2.0"]
 
 # The importable distribution is the `assetcore` package only; the repo also holds
 # tests/, scripts/, docs/, and the generated site/ at top level, so constrain

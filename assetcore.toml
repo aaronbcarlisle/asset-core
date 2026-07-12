@@ -31,6 +31,28 @@ provider = "broadcast"              # one of: broadcast | postgres
 #   [sinks.main.config]
 #   dsn = "${ASSETCORE_DSN}"
 
+# --- auth: who is calling (optional section; omit for the static token map) -----
+[auth.main]
+provider = "static"                 # one of: static | jwt
+[auth.main.config]
+# static: tokens come from ASSETCORE_TOKENS (or the dev defaults) unless given here:
+# [auth.main.config.tokens]
+# "some-token" = "artist"
+#
+# jwt (verified identity — any OIDC IdP; needs the `auth` extra):
+#   [auth.main]
+#   provider = "jwt"
+#   [auth.main.config]
+#   jwks_url = "https://idp.studio.com/.well-known/jwks.json"   # or: secret = "${ASSETCORE_JWT_SECRET}"
+#   issuer   = "https://idp.studio.com"
+#   audience = "assetcore"
+#   roles_claim   = "roles"        # claim holding the caller's roles/groups
+#   subject_claim = "sub"          # becomes the VERIFIED actor on writes
+#   [auth.main.config.role_map]    # IdP role/group -> authority
+#   "pipeline-production" = "production"
+#   "artists"             = "artist"
+#   "build-farm"          = "build"
+
 # --- production tracker: a VIEW over identity (ShotGrid / Jira / ftrack) --------
 [trackers.production]
 provider = "shotgrid"               # which TrackerAdapter implementation

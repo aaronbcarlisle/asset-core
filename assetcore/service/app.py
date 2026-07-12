@@ -42,7 +42,7 @@ def create_app(
         if cfg_path:
             from assetcore.sdk.settings import Settings
             settings = Settings.load(cfg_path)
-            settings.validate(["repo", "sink"])  # fail fast on a bad config at startup
+            settings.validate(["repo", "sink", "auth"])  # fail fast at startup
         if repo is None:
             if settings is not None:
                 repo = settings.repo("main")
@@ -55,11 +55,24 @@ def create_app(
             else:
                 sink = BroadcastSink()
 
+    # auth is a provider too (static token map | verified jwt). Config selects it;
+    # absent an [auth.main] section, the static map (explicit `tokens` arg, else
+    # ASSETCORE_TOKENS / dev defaults) keeps the original behavior.
+    auth_provider = None
+    cfg_path = os.environ.get("ASSETCORE_CONFIG")
+    if cfg_path and tokens is None:
+        from assetcore.sdk.settings import Settings
+        cfg = Settings.load(cfg_path)
+        if cfg.has_section("auth"):
+            auth_provider = cfg.auth("main")
+    if auth_provider is None:
+        auth_provider = auth.StaticTokenAuth(tokens if tokens is not None else auth.load_tokens())
+
     app = FastAPI(title="assetcore", version="0.1.0",
                   summary="Identity-first asset management — the only door (L2).")
     app.state.service = AssetcoreService(repo, sink)
     app.state.sink = sink
-    app.state.tokens = tokens if tokens is not None else auth.load_tokens()
+    app.state.auth = auth_provider
     app.state.latency = {"count": 0, "total_ms": 0.0, "max_ms": 0.0}
     # DB work leaves the event loop only when BOTH ends are thread-safe: the
     # pooled PostgresRepo checks connections out per call, and the postgres sink
