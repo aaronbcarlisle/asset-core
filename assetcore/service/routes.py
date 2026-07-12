@@ -16,7 +16,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import StreamingResponse
 
-from assetcore.app.services import AssetcoreService
+from assetcore.app.services import AssetcoreService, DeclareConflict
 from assetcore.service import auth
 from assetcore.service.events import event_source
 from assetcore.service.schemas import (
@@ -85,7 +85,10 @@ async def metrics(request: Request, service: AssetcoreService = Depends(get_serv
 @router.post("/assets", response_model=DeclareResponse, status_code=201)
 async def declare(body: DeclareRequest, response: Response, service: AssetcoreService = Depends(get_service),
                   _: str = Depends(auth.require(auth.ARTIST, auth.ENGINE))) -> DeclareResponse:
-    result = service.declare(body.asset_type, body.created_by, body.origin, asset_id=body.id)
+    try:
+        result = service.declare(body.asset_type, body.created_by, body.origin, asset_id=body.id)
+    except DeclareConflict as exc:   # same id, different payload -> genuine collision
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     if not result.created:
         response.status_code = 200
     return DeclareResponse(id=result.id)

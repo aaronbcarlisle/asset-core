@@ -152,6 +152,12 @@ curl -s -X POST localhost:8000/assets -H 'X-Assetcore-Token: artist-token' \
 # -> {"id":"…"}  (HTTP 201)
 ```
 
+Passing an `id` makes declare **idempotent** (the offline-hub path mints the UUID
+client-side, then replays): re-declaring the same id with the same
+`asset_type`/`created_by` is a no-op and returns **200** instead of 201. Re-using
+that id with a *different* payload is a genuine collision, not a retry, and is
+rejected with **409**.
+
 ### Resolve
 
 UUID → all three facets in one lookup (replaces "dig through folders"). Returns

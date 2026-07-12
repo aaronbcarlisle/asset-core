@@ -43,6 +43,33 @@ def test_declare_with_client_id_is_idempotent_and_sdk_accepts_id(client):
     assert sdk.declare("prop", "artist-a", asset_id=aid) == aid
 
 
+def test_declare_with_mismatched_payload_is_409(client):
+    aid = str(uuid4())
+    first = client.post(
+        "/assets",
+        json={"id": aid, "asset_type": "prop", "created_by": "artist-a"},
+        headers=ARTIST,
+    )
+    assert first.status_code == 201, first.text
+
+    # same id, DIFFERENT asset_type -> genuine collision, not an idempotent retry
+    conflict_type = client.post(
+        "/assets",
+        json={"id": aid, "asset_type": "set", "created_by": "artist-a"},
+        headers=ARTIST,
+    )
+    assert conflict_type.status_code == 409, conflict_type.text
+    assert "already exists" in conflict_type.json()["detail"]
+
+    # same id, DIFFERENT created_by -> also a collision
+    conflict_creator = client.post(
+        "/assets",
+        json={"id": aid, "asset_type": "prop", "created_by": "artist-b"},
+        headers=ARTIST,
+    )
+    assert conflict_creator.status_code == 409, conflict_creator.text
+
+
 def test_list_assets_supports_scope_filters_and_summary_shape(client):
     sdk = AssetcoreClient(token="artist-token", http=client)
 

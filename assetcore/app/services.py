@@ -21,6 +21,14 @@ from assetcore.core.ports import AssetRepo, EventSink
 from assetcore.core.types import BindingMode, RelType
 
 
+class DeclareConflict(Exception):
+    """A declare-with-id reused an existing id with a DIFFERENT payload.
+
+    Distinct from an idempotent retry (same id, same asset_type/created_by), which
+    is a no-op. The service maps this to HTTP 409.
+    """
+
+
 class DeclareResult(NamedTuple):
     """Result of declare with idempotency status."""
 
@@ -35,8 +43,19 @@ class AssetcoreService:
 
     def declare(self, asset_type: str, created_by: str, origin: dict | None = None,
                 asset_id: UUID | None = None) -> DeclareResult:
-        if asset_id is not None and self.repo.get_asset(asset_id) is not None:
-            return DeclareResult(id=asset_id, created=False)
+        if asset_id is not None:
+            existing = self.repo.get_asset(asset_id)
+            if existing is not None:
+                # idempotent re-declare, but ONLY when the payload matches: a replay
+                # of the SAME declare is a no-op (created=False); a replay with a
+                # different asset_type/created_by is a genuine id collision, not an
+                # idempotent retry — surface it (409) rather than silently "succeed".
+                if existing.asset_type != asset_type or existing.created_by != created_by:
+                    raise DeclareConflict(
+                        f"asset {asset_id} already exists as "
+                        f"({existing.asset_type!r}, created_by={existing.created_by!r}); "
+                        f"cannot re-declare as ({asset_type!r}, created_by={created_by!r})")
+                return DeclareResult(id=asset_id, created=False)
         declared_id = verbs.declare(self.repo, self.sink, asset_type, created_by, origin, asset_id=asset_id)
         return DeclareResult(id=declared_id, created=True)
 
