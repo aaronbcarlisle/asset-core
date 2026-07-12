@@ -108,6 +108,15 @@ def test_declare_requires_a_token(client):
     assert r.status_code == 401
 
 
+def test_response_carries_request_id(client):
+    # minted when absent...
+    r = client.get("/health")
+    assert r.headers.get("X-Request-ID")
+    # ...and echoed when the caller supplies one (end-to-end correlation)
+    r2 = client.get("/health", headers={"X-Request-ID": "trace-abc"})
+    assert r2.headers["X-Request-ID"] == "trace-abc"
+
+
 def test_claim_requires_production(client):
     aid = _declare(client)
     forbidden = client.post(f"/assets/{aid}/claim",

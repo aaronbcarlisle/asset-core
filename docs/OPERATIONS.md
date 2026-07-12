@@ -52,6 +52,28 @@ ASSETCORE_DSN=postgresql://user:pass@host/assetcore alembic -c assetcore/db/alem
 > same five tables). A future cleanup can have `postgres_repo` bootstrap via
 > Alembic so there is a single source.
 
+## Authentication (dev-grade — fail closed in prod)
+
+Auth is a token→authority map (`X-Assetcore-Token` header). The built-in defaults
+(`prod-token`, `artist-token`, `engine-token`, `build-token`) are **well-known dev
+tokens** — convenient locally, dangerous exposed.
+
+- Set `ASSETCORE_TOKENS` (JSON `{"<token>": "<authority>"}`) to your real tokens.
+- If it's unset the service logs a loud warning and falls back to the dev tokens.
+- Set `ASSETCORE_REQUIRE_TOKENS=1` to **fail startup** rather than fall back — the
+  production-safe posture (a misconfigured deploy refuses to run with dev tokens).
+
+Signed identities / real RBAC are out of scope here (they need a studio identity
+decision — OIDC/LDAP); `ASSETCORE_REQUIRE_TOKENS` closes the immediate hole.
+
+## Request correlation
+
+Every response carries an `X-Request-ID` (minted per request, or echoed from an
+inbound `X-Request-ID`), and the service logs one structured line per request
+(`method=… path=… status=… duration_ms=… request_id=…`). Logging handlers are the
+host's to configure (uvicorn sets them up); the library never hijacks the root
+logger.
+
 ## Observability
 
 `GET /metrics` returns operational health (no auth; scrape it):
