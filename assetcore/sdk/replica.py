@@ -33,13 +33,46 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 """
 
 
+_ASSETS_COLUMNS = ("id", "name", "asset_type", "status", "created_by",
+                   "taxonomy", "updated_at", "payload_json")
+
+
 def open_replica(path: str) -> sqlite3.Connection:
     conn = sqlite3.connect(path, timeout=30.0)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA busy_timeout=30000")
-    conn.executescript(_SCHEMA)
+    conn.executescript(_SCHEMA)     # creates missing tables at the CURRENT schema
+    _migrate_assets(conn)           # upgrade a pre-existing cache in place
     return conn
+
+
+def _migrate_assets(conn: sqlite3.Connection) -> None:
+    """Bring an older replica's `assets` table up to the current schema in place.
+
+    A cache created by an earlier version lacks the extracted `taxonomy` column and
+    has `asset_type NOT NULL`; `upsert_asset` would then fail ("no such column" or a
+    NOT NULL violation on offline/partial records). Rebuild the table preserving
+    overlapping rows so an existing hub cache upgrades without a manual delete /
+    full re-hydrate. (The replica is a cache; the outbox is the durable queue.)
+    """
+    info = conn.execute("PRAGMA table_info(assets)").fetchall()
+    if not info:
+        return
+    cols = {r["name"] for r in info}
+    asset_type_not_null = any(r["name"] == "asset_type" and r["notnull"] == 1 for r in info)
+    if "taxonomy" in cols and not asset_type_not_null:
+        return   # already current — no rebuild
+    carried = [c for c in _ASSETS_COLUMNS if c in cols]
+    collist = ", ".join(carried)
+    with conn:
+        conn.execute("ALTER TABLE assets RENAME TO _assets_legacy")
+        conn.executescript(
+            "CREATE TABLE assets ("
+            " id TEXT PRIMARY KEY, name TEXT NOT NULL, asset_type TEXT, status TEXT,"
+            " created_by TEXT, taxonomy TEXT, updated_at TEXT, payload_json TEXT NOT NULL);")
+        conn.execute(f"INSERT INTO assets ({collist}) SELECT {collist} FROM _assets_legacy")
+        conn.execute("DROP TABLE _assets_legacy")
 
 
 def _record_updated_at(record: dict) -> str | None:
@@ -105,13 +138,30 @@ def _atomic_replace(src: str, dst: str) -> None:
     raise last_err  # type: ignore[misc]
 
 
+_HYDRATE_PAGE = 500
+
+
+def _list_all(client, **filters) -> list[dict]:
+    """Page through client.list_assets() to completion — /assets defaults to
+    limit=500, so a single call would silently truncate a large catalog."""
+    out: list[dict] = []
+    offset = 0
+    while True:
+        page = client.list_assets(limit=_HYDRATE_PAGE, offset=offset, **filters)
+        out.extend(page)
+        if len(page) < _HYDRATE_PAGE:
+            return out
+        offset += _HYDRATE_PAGE
+
+
 def hydrate_cache(pipeline: PipelineConfig, ctx: HubContext, client, now_iso: str) -> dict:
     project = pipeline.scope.get("assetcore_project", "")
     prefix = project
     since = (datetime.fromisoformat(now_iso.replace("Z", "+00:00")) - timedelta(days=pipeline.recent_days)).isoformat()
-    # seed set: user's authored assets + recently touched (spec §5.2 steps 1)
-    seeds = {a["id"]: a for a in client.list_assets(created_by=ctx["user_name"], taxonomy_prefix=prefix)}
-    for a in client.list_assets(taxonomy_prefix=prefix, updated_since=since):
+    # seed set: user's authored assets + recently touched (spec §5.2 steps 1),
+    # paged so catalogs larger than one /assets page are fully hydrated.
+    seeds = {a["id"]: a for a in _list_all(client, created_by=ctx["user_name"], taxonomy_prefix=prefix)}
+    for a in _list_all(client, taxonomy_prefix=prefix, updated_since=since):
         seeds.setdefault(a["id"], a)
     # transitive dependency closure via BFS (spec §5.2 step 2) — edges from dependencies()
     tmp = pipeline.local_cache + ".tmp"
