@@ -72,11 +72,12 @@ CLAUDE.md         context for continuing with Claude Code
 See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md#3-repository-layout--the-layers) for
 the per-layer breakdown.
 
-## Studio UGS hub bridge (`feature/ugs-hub`)
+## Studio UGS hub
 
-Python SDK + CLI for the **Studio UGS + asset-core** artist hub: hybrid local-first
-reads, central-or-outbox writes, config-driven DCC launch. Design spec lives in the
-companion `ugs-dev` repo (`docs/superpowers/specs/2026-07-11-ugs-assetcore-hub-design.md`).
+Python SDK + CLI (`assetcore/sdk/hub*.py`) for the **Studio UGS + asset-core**
+artist hub: hybrid local-first reads, central-or-outbox writes, config-driven DCC
+launch. Design spec lives in the companion `ugs-dev` repo
+(`docs/superpowers/specs/2026-07-11-ugs-assetcore-hub-design.md`).
 
 ### Hybrid model (summary)
 
@@ -105,7 +106,7 @@ All verbs emit JSON on stdout; exit `0` on success, `1` on failure (except `serv
 
 Example studio config: [`pipeline.toml.example`](pipeline.toml.example) (6 DCC launch targets, `${VAR}` expansion per spec §6.1).
 
-Install: `pip install -e .` on branch `feature/ugs-hub`. UGS plugin invokes `assetcore` via subprocess only — no Python in the C# host.
+Install: `pip install -e .` (the hub ships on `main`). UGS plugin invokes `assetcore` via subprocess only — no Python in the C# host.
 
 ## Continuing with Claude Code
 
