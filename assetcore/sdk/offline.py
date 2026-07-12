@@ -119,7 +119,18 @@ def _already_applied(client, entry: OutboxEntry) -> bool:
     try:
         if verb == "declare":
             aid = p.get("id")
-            return bool(aid and client.resolve(aid) is not None)
+            if not aid:
+                return False
+            existing = client.resolve(aid)
+            if existing is None:
+                return False
+            # match the service's declare-with-id rule: only "already applied" when
+            # the stored asset matches the queued payload. A mismatch is a genuine
+            # collision (central 409s) — don't silently mark it done; let it dispatch
+            # and surface as a failure.
+            meta = existing.get("meta") or {}
+            return (meta.get("asset_type") in (None, p.get("asset_type"))
+                    and meta.get("created_by") in (None, p.get("created_by")))
         if verb == "bind_source":
             cur = client.get_source(p["asset_id"])
             return bool(cur and cur["location_uri"] == p["location_uri"]

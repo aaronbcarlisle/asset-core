@@ -135,6 +135,35 @@ class _FakeHTTPError(Exception):
         self.response = _FakeResponse(status_code, text)
 
 
+def test_replay_declare_skips_only_on_matching_payload(tmp_path):
+    # existing asset with the SAME payload -> already applied (skipped)
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "declare", {"id": "id-1", "asset_type": "prop", "created_by": "amy"}, asset_id="id-1")
+
+    class MatchClient(FakeClient):
+        def resolve(self, asset_id):
+            return {"id": asset_id, "meta": {"asset_type": "prop", "created_by": "amy"}}
+
+    result = replay_outbox(db, MatchClient())
+    assert result["skipped"] == 1 and result["replayed"] == 0
+
+
+def test_replay_declare_dispatches_on_payload_mismatch(tmp_path):
+    # existing asset with a DIFFERENT payload -> genuine collision, must NOT be
+    # silently skipped; it dispatches (central would 409) and surfaces as failed.
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "declare", {"id": "id-1", "asset_type": "set", "created_by": "amy"}, asset_id="id-1")
+
+    class MismatchClient(FakeClient):
+        def resolve(self, asset_id):
+            return {"id": asset_id, "meta": {"asset_type": "prop", "created_by": "amy"}}
+        def declare(self, *a, **kw):
+            raise _FakeHTTPError(409, "asset id-1 already exists as ('prop', ...)")
+
+    result = replay_outbox(db, MismatchClient())
+    assert result["skipped"] == 0 and result["failed"] == 1     # collision surfaced
+
+
 def test_replay_treats_duplicate_edge_as_applied(tmp_path):
     # a relate that already reached central (crash between the write and mark_done)
     # comes back as 400 "duplicate edge" -> already-applied, NOT a failure/hold.
