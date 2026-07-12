@@ -268,9 +268,18 @@ erroring.
 
 For §7.5.4 replay safety, duplicate relationship replays are rejected at L1 by
 `verbs.relate`: it raises `ValueError("duplicate edge: ...")` when the same typed
-edge already exists. This behavior is independent of `_already_applied` checks,
-which are used for dependency replay helpers and are not the dedupe guard for
-`relate`.
+edge already exists (HTTP **400** over the service). On replay this is *expected*
+after a crash between the central write and the outbox `mark_done`: `replay_outbox`
+recognises a duplicate-edge error (`_is_duplicate_edge_error`) and marks the entry
+**done** rather than failing it and holding the asset's queue — so a half-committed
+relate can't poison the outbox.
+
+Outbox idempotency (`_already_applied`) is **exact-match, never ordered**:
+`revision` is an opaque string (P4 CL, git sha), so an entry is skipped only when
+central's current state equals exactly what the entry would write. A queued write
+against a *different* current revision is dispatched and lands as a new (monotonic,
+auditable) version — never silently dropped. (The earlier `>=` string comparison
+was doubly wrong: `"9" >= "10"` is `True`, and git shas have no order at all.)
 
 ---
 

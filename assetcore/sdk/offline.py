@@ -105,7 +105,16 @@ def list_failed(conn: sqlite3.Connection) -> list[OutboxEntry]:
 
 
 def _already_applied(client, entry: OutboxEntry) -> bool:
-    """Read central state; True if it already reflects this entry (spec §5.3, §7.5.4)."""
+    """Read central state; True if it already reflects this entry (spec §5.3, §7.5.4).
+
+    Idempotency is EXACT-MATCH, never ordered: revisions are opaque strings (P4 CLs,
+    git shas) with no reliable ordering — the old ``>=`` comparison was doubly wrong
+    (``"9" >= "10"`` is True, and a git sha has no order at all). So an entry counts
+    as already-applied only when central's current state equals exactly what this
+    entry would write. A queued write against a DIFFERENT current revision is NOT
+    skipped — it is dispatched and lands as a new (monotonic, auditable) version
+    rather than being silently dropped.
+    """
     p, verb = entry["payload"], entry["verb"]
     try:
         if verb == "declare":
@@ -114,15 +123,38 @@ def _already_applied(client, entry: OutboxEntry) -> bool:
         if verb == "bind_source":
             cur = client.get_source(p["asset_id"])
             return bool(cur and cur["location_uri"] == p["location_uri"]
-                        and str(cur["revision"]) >= str(p["revision"]))
+                        and str(cur["revision"]) == str(p["revision"]))
         if verb == "relocate":
             cur = client.get_source(p["asset_id"])
-            return bool(cur and cur["location_uri"] == p["new_location_uri"])
-        if verb == "relate":
-            return False
+            return bool(cur and cur["location_uri"] == p["new_location_uri"]
+                        and (p.get("new_revision") is None
+                             or str(cur.get("revision")) == str(p["new_revision"])))
+        # relate/rename/bulk carry no cheaply-checkable "already there" signal;
+        # a re-applied relate that central already has surfaces as a duplicate-edge
+        # error at dispatch, which replay_outbox treats as already-applied.
         return False
     except Exception:
         return False
+
+
+def _is_duplicate_edge_error(exc: Exception) -> bool:
+    """True when a dispatch failed only because the edge already exists on central.
+
+    A relate replayed after it already reached central (e.g. a crash between the
+    central write and mark_done) comes back as HTTP 400/409 whose body names a
+    duplicate edge. That is success-from-our-side, not a failure to hold the queue
+    on — so replay treats it as already-applied instead of poisoning the outbox.
+    """
+    response = getattr(exc, "response", None)
+    if response is None:
+        return False
+    try:
+        if response.status_code not in (400, 409):
+            return False
+        body = response.text.lower()
+    except Exception:
+        return False
+    return "duplicate edge" in body or "edge already exists" in body
 
 
 def _dispatch(client, entry: OutboxEntry) -> None:
@@ -162,6 +194,10 @@ def replay_outbox(conn: sqlite3.Connection, client) -> dict:
             mark_done(conn, entry["id"])
             replayed += 1
         except Exception as exc:
+            if _is_duplicate_edge_error(exc):   # already on central (crash-after-write)
+                mark_done(conn, entry["id"])
+                skipped += 1
+                continue
             mark_failed(conn, entry["id"], repr(exc))
             failed += 1
             if aid:

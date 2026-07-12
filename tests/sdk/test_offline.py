@@ -74,14 +74,39 @@ def test_replay_dispatches_all_verbs(tmp_path):
 
 
 def test_replay_skips_already_applied_bind(tmp_path):
+    # exact match (same location AND revision) -> our write already landed -> skip
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "bind_source", {"asset_id": "id-1", "location_uri": "//d/a.ma", "tool": "maya",
+                                "revision": "3", "published_by": "a"}, asset_id="id-1")
+    client = FakeClient(existing_sources={"id-1": {"location_uri": "//d/a.ma", "tool": "maya", "revision": "3"}})
+    result = replay_outbox(db, client)
+    assert result["skipped"] == 1 and result["replayed"] == 0
+    assert client.calls == []
+    assert pending_count(db) == 0
+
+
+def test_replay_reapplies_bind_when_revision_differs(tmp_path):
+    # central at a DIFFERENT revision: opaque revisions have no order, so the queued
+    # write is dispatched (lands as a new version), never silently dropped.
     db = open_outbox(str(tmp_path / "o.db"))
     enqueue(db, "bind_source", {"asset_id": "id-1", "location_uri": "//d/a.ma", "tool": "maya",
                                 "revision": "3", "published_by": "a"}, asset_id="id-1")
     client = FakeClient(existing_sources={"id-1": {"location_uri": "//d/a.ma", "tool": "maya", "revision": "5"}})
     result = replay_outbox(db, client)
-    assert result["skipped"] == 1 and result["replayed"] == 0
-    assert client.calls == []
-    assert pending_count(db) == 0
+    assert result["replayed"] == 1 and result["skipped"] == 0
+    assert client.calls == [("bind_source", "id-1", "//d/a.ma")]
+
+
+def test_replay_bind_idempotency_is_not_string_ordered(tmp_path):
+    # regression: the old check compared revisions as strings, so "9" >= "10" was
+    # True and a real pending write got wrongly skipped. Exact-match fixes it.
+    assert "9" >= "10"                                   # the trap, made explicit
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "bind_source", {"asset_id": "id-1", "location_uri": "//d/a.ma", "tool": "maya",
+                                "revision": "10", "published_by": "a"}, asset_id="id-1")
+    client = FakeClient(existing_sources={"id-1": {"location_uri": "//d/a.ma", "tool": "maya", "revision": "9"}})
+    result = replay_outbox(db, client)
+    assert result["replayed"] == 1 and result["skipped"] == 0   # NOT skipped
 
 
 def test_replay_holds_later_entries_for_failed_asset(tmp_path):
@@ -96,6 +121,52 @@ def test_replay_holds_later_entries_for_failed_asset(tmp_path):
     assert ("relocate", "id-1", "//d/z.ma") not in client.calls
     failed = list_failed(db)
     assert all("central rejected" in (f["error"] or "") for f in failed)
+
+
+class _FakeResponse:
+    def __init__(self, status_code, text):
+        self.status_code = status_code
+        self.text = text
+
+
+class _FakeHTTPError(Exception):
+    def __init__(self, status_code, text):
+        super().__init__(text)
+        self.response = _FakeResponse(status_code, text)
+
+
+def test_replay_treats_duplicate_edge_as_applied(tmp_path):
+    # a relate that already reached central (crash between the write and mark_done)
+    # comes back as 400 "duplicate edge" -> already-applied, NOT a failure/hold.
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "relate", {"from_asset": "id-1", "to_asset": "id-2",
+                           "rel_type": "DEPENDS_ON", "actor": "a"}, asset_id="id-1")
+    enqueue(db, "rename", {"asset_id": "id-1", "new_name": "hero", "actor": "a"}, asset_id="id-1")
+
+    class DupEdgeClient(FakeClient):
+        def relate(self, *a, **kw):
+            raise _FakeHTTPError(400, "duplicate edge: id-1-DEPENDS_ON->id-2")
+
+    client = DupEdgeClient()
+    result = replay_outbox(db, client)
+    assert result["skipped"] == 1          # the duplicate relate: treated as applied
+    assert result["replayed"] == 1         # the following rename still runs
+    assert result["failed"] == 0 and result["held"] == 0
+    assert pending_count(db) == 0          # outbox drained, not poisoned
+
+
+def test_replay_real_relate_failure_still_fails(tmp_path):
+    # a non-duplicate error (e.g. 500 / connection) is a genuine failure + hold.
+    db = open_outbox(str(tmp_path / "o.db"))
+    enqueue(db, "relate", {"from_asset": "id-1", "to_asset": "id-2",
+                           "rel_type": "DEPENDS_ON", "actor": "a"}, asset_id="id-1")
+
+    class BrokenClient(FakeClient):
+        def relate(self, *a, **kw):
+            raise _FakeHTTPError(500, "internal server error")
+
+    result = replay_outbox(db, BrokenClient())
+    assert result["failed"] == 1 and result["skipped"] == 0
 
 
 def test_retry_failed_resets_to_pending(tmp_path):
