@@ -209,6 +209,31 @@ tracker, storage repo — is now a `assetcore.toml` edit, not code (Phase 9).
 Remaining work is operational (run against real Postgres + real Maya/Unreal/
 Substance on iron) — staged behind skips, not architecture.
 
+## Post-1.0 hardening audit
+
+A full audit pass tightened correctness, production-support, and API clarity
+without touching the core design:
+
+- **Bugs fixed:** PIN binding now requires a `pinned_version` (was a silent
+  resolve-to-nothing); outbox replay idempotency is exact-match not string-ordered
+  (`"9" >= "10"`) and treats a duplicate-edge replay as applied; `declare`-with-id
+  409s on a payload mismatch instead of silently succeeding; `claim` on a
+  DEPRECATED asset requires explicit `reactivate=True`.
+- **Hub:** the local reader now returns the central shapes and its
+  `taxonomy_prefix`/`updated_since` filters actually work (were silently empty);
+  `HybridClient` aligned with `AssetcoreClient`.
+- **Production support:** a real CI workflow (suite + `lint-imports` +
+  config-validate, plus a Postgres-service job) — the firewall/gates the docs
+  promised are now enforced; concurrent facet-version writes retry on a typed
+  `VersionConflict`; the event log is bounded with explicit resume-gap signalling;
+  `list`/`worklist`/`metrics` use batch getters + pagination (no N+1); auth can
+  fail closed (`ASSETCORE_REQUIRE_TOKENS`) and every request is logged with an id.
+- **API clarity:** the single-file prototype moved to `examples/prototype/` and
+  `import assetcore` now surfaces the modern client; the hub CLI moved to L3
+  (`sdk/hub_cli.py`) with a 4th import-linter contract forbidding sdk→integrations;
+  `bind_runtime`/`set_binding` record a real actor; source/runtime version-history
+  endpoints added; a schema-parity test guards `infra/schema.sql` ↔ the migration.
+
 ## Standing risks (carry forward — ARCHITECTURE Part 7.3 / Part 11)
 
 1. Stamp coverage is existential — missing is recoverable, stripped is not.

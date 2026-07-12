@@ -591,11 +591,14 @@ path-driving), the provisional queue is groomed not a junk drawer, and an artist
 declaring a "barrel" is shown existing barrels first.
 
 ### Phase 8 — Hardening to finished product
-Auth/RBAC per authority hardened; event delivery idempotency + catch-up on
-reconnect; reconciliation moved to event-driven where the engine supports save
-hooks; observability (metrics on resolve latency, stamp-coverage %, provisional
-age); the stamp-coverage CI gate (build fails if any shipped asset is unstamped);
-backup/restore of the binding DB; load testing the resolver.
+Per-authority auth enforced (token→authority, with a fail-closed
+`ASSETCORE_REQUIRE_TOKENS` posture; signed identities / full RBAC remain a studio
+identity-integration decision, deliberately out of scope); event delivery
+idempotency + catch-up on reconnect; reconciliation moved to event-driven where
+the engine supports save hooks; observability (metrics on resolve latency,
+stamp-coverage %, provisional age); the stamp-coverage CI gate (build fails if any
+shipped asset is unstamped); backup/restore of the binding DB; load testing the
+resolver.
 **Done when:** stamp coverage is monitored and enforced, the binding DB has
 backup/restore runbooks, and resolve latency is within budget under realistic
 asset counts. *This is "finished product" for a studio rollout.*

@@ -13,10 +13,11 @@ lint-imports          # or: python -c "from importlinter.cli import lint_imports
 ```
 
 Contracts live in `pyproject.toml [tool.importlinter]`: inward-only layering
-(service → infra → app → core), the SDK-over-HTTP firewall, and the integrations
-firewall. CI must run this; a PR that does `import maya` in `core/` fails here.
-The AST source-scan in `tests/contract/test_sdk_firewall.py` is a zero-dependency
-backstop that runs in the normal test suite.
+(service → infra → app → core), the SDK-over-HTTP firewall, the integrations
+firewall, and the SDK-never-imports-integrations rule (4 contracts). CI runs this
+on every PR/push (`.github/workflows/test.yml`); a PR that does `import maya` in
+`core/` fails there. The AST source-scan in `tests/contract/test_sdk_firewall.py`
+is a zero-dependency backstop that runs in the normal test suite.
 
 ## Config validation (assetcore.toml — fail fast before deploy)
 
@@ -48,9 +49,10 @@ ASSETCORE_DSN=sqlite:///check.db alembic -c assetcore/db/alembic.ini upgrade hea
 ASSETCORE_DSN=postgresql://user:pass@host/assetcore alembic -c assetcore/db/alembic.ini upgrade head
 ```
 
-> Keep `schema.sql` and the migration in sync (they are two expressions of the
-> same five tables). A future cleanup can have `postgres_repo` bootstrap via
-> Alembic so there is a single source.
+> `infra/schema.sql` and the migration are kept in sync (two expressions of the
+> same tables) — `tests/integration/test_schema_parity.py` fails the build if they
+> drift. A future cleanup can have `postgres_repo` bootstrap via Alembic so there
+> is a single source.
 
 ## Authentication (dev-grade — fail closed in prod)
 
