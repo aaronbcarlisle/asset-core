@@ -209,11 +209,12 @@ lint-imports
 python -c "from importlinter.cli import lint_imports; lint_imports()"
 ```
 
-Three contracts live in `pyproject.toml [tool.importlinter]`:
+Four contracts live in `pyproject.toml [tool.importlinter]`:
 
 1. **Inward-only layering** — `service → infra → app → core`.
 2. **SDK over HTTP** — `assetcore.sdk` may not import `core`/`app`/`infra`/`service`.
 3. **Integrations import only the SDK** — `assetcore.integrations` may not import the inner layers.
+4. **SDK never reaches up to L4** — `assetcore.sdk` may not import `assetcore.integrations`.
 
 A second, zero-dependency backstop runs in the normal suite:
 `tests/contract/test_sdk_firewall.py` AST-scans the source so the firewall is

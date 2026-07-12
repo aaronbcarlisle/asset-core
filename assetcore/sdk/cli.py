@@ -275,8 +275,7 @@ def run(args, client: AssetcoreClient) -> int:
 def main(argv=None) -> int:
     effective = sys.argv[1:] if argv is None else argv
     if effective and effective[0] == "hub":
-        import importlib
-        hub_main = importlib.import_module("assetcore.integrations.hub_bridge").main
+        from assetcore.sdk.hub_cli import main as hub_main   # L3 -> L3, no importlib indirection
         return hub_main(effective)
     args = build_parser().parse_args(argv)
     url = getattr(args, "url", DEFAULT_URL)
