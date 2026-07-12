@@ -78,6 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
     g = add("claim", help="give a provisional asset identity (production)")
     g.add_argument("asset_id"); g.add_argument("--name", required=True)
     g.add_argument("--taxonomy", required=True); g.add_argument("--actor", required=True)
+    g.add_argument("--reactivate", action="store_true",
+                   help="also resurrect the asset if it was deprecated")
 
     g = add("rename", help="relabel the identity facet only (production)")
     g.add_argument("asset_id"); g.add_argument("--name", required=True)
@@ -166,7 +168,8 @@ def run(args, client: AssetcoreClient) -> int:
         aid = client.declare(args.asset_type, args.created_by)
         _out(args, {"id": aid}, aid)
     elif cmd == "claim":
-        client.claim(args.asset_id, args.name, args.taxonomy, args.actor)
+        client.claim(args.asset_id, args.name, args.taxonomy, args.actor,
+                     reactivate=getattr(args, "reactivate", False))
         _out(args, {"ok": True}, f"claimed {args.asset_id} as {args.name!r}")
     elif cmd == "rename":
         client.rename(args.asset_id, args.name, args.actor, args.taxonomy)

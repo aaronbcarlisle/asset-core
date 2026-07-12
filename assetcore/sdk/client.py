@@ -60,10 +60,10 @@ class AssetcoreClient:
         return self._post("/assets", body).json()["id"]
 
     def claim(self, asset_id: str, display_name: str, taxonomy: str, actor: str,
-              attributes: dict | None = None) -> None:
+              attributes: dict | None = None, reactivate: bool = False) -> None:
         self._post(f"/assets/{asset_id}/claim", {
             "display_name": display_name, "taxonomy": taxonomy, "actor": actor,
-            "attributes": attributes or {},
+            "attributes": attributes or {}, "reactivate": reactivate,
         })
 
     def rename(self, asset_id: str, new_name: str, actor: str,

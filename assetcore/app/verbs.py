@@ -47,23 +47,33 @@ def declare(repo: AssetRepo, sink: EventSink, asset_type: str, created_by: str,
 # CLAIM — Production gives a provisional asset meaning (the backfill step).
 # ---------------------------------------------------------------------------
 def claim(repo: AssetRepo, sink: EventSink, asset_id: UUID, display_name: str,
-          taxonomy: str, actor: str, **attrs) -> None:
+          taxonomy: str, actor: str, *, reactivate: bool = False, **attrs) -> None:
     """Production gives a provisional asset meaning — the backfill step.
 
     Sets the identity facet's display name + taxonomy and flips lifecycle to
     ACTIVE. ``**attrs`` is an authoritative set of identity attributes (a claim
-    with none clears them). Raises ``ValueError`` if the asset is unknown. Emits
-    an ``identity.claimed`` event.
+    with none clears them). Raises ``ValueError`` if the asset is unknown.
+
+    Claiming a DEPRECATED asset resurrects it — a real state change that must be
+    deliberate, so it is refused unless ``reactivate=True`` is passed (otherwise a
+    routine backfill could silently un-retire something). When it does reactivate,
+    the emitted ``identity.claimed`` event carries ``reactivated: true`` for audit.
     """
     identity = repo.get_identity(asset_id)
     if identity is None:
         raise ValueError(f"cannot claim unknown asset {asset_id}")
+    asset = repo.get_asset(asset_id)
+    was_deprecated = asset is not None and asset.lifecycle == Lifecycle.DEPRECATED
+    if was_deprecated and not reactivate:
+        raise ValueError(
+            f"asset {asset_id} is deprecated; pass reactivate=True to resurrect it")
     identity.display_name = display_name
     identity.taxonomy = taxonomy
     identity.attributes = dict(attrs)   # authoritative set: a claim with no attrs clears them
     repo.save_identity(identity)
     repo.set_lifecycle(asset_id, Lifecycle.ACTIVE)
-    sink.emit(Event(asset_id, "identity.claimed", {"name": display_name}, actor))
+    sink.emit(Event(asset_id, "identity.claimed",
+                    {"name": display_name, "reactivated": was_deprecated}, actor))
 
 
 # ---------------------------------------------------------------------------
@@ -368,7 +378,8 @@ def relocate(repo: AssetRepo, sink: EventSink, asset_id: UUID, new_location_uri:
 def deprecate(repo: AssetRepo, sink: EventSink, asset_id: UUID, actor: str) -> None:
     """Mark an identity DEPRECATED. Reversible (it's a lifecycle flag, not a delete)
     and never strips facets or edges — `dependents` still finds who's on it, so a
-    retire is safe and auditable.
+    retire is safe and auditable. To bring it back, `claim(..., reactivate=True)`
+    (a plain claim refuses, so a routine backfill can't silently un-retire it).
     """
     if repo.get_asset(asset_id) is None:
         raise ValueError(f"cannot deprecate unknown asset {asset_id}")

@@ -199,6 +199,18 @@ c.claim(aid, "Weathered Barrel", "props/env/barrels", "pat",
 assetcore claim <id> --name "Weathered Barrel" --taxonomy props/env/barrels --actor pat
 ```
 
+Claiming a **deprecated** asset resurrects it, which must be deliberate: it is
+refused (**409**) unless you pass `reactivate=True` (`--reactivate` on the CLI), so
+a routine backfill can't silently un-retire something. The reactivating claim emits
+`identity.claimed` with `reactivated: true`.
+
+```python
+c.claim(aid, "Barrel Redux", "props/env/barrels", "pat", reactivate=True)
+```
+```bash
+assetcore claim <id> --name "Barrel Redux" --taxonomy props/env/barrels --actor pat --reactivate
+```
+
 ### Rename
 
 Relabel the **identity facet only** — no file moves, no engine changes. This is the
@@ -424,7 +436,8 @@ For directory-wide moves across many assets, see
 
 Retire an identity (lifecycle → `deprecated`). Reversible (it's a flag, not a
 delete) and never strips facets or edges — `dependents` still finds who's on it, so
-the retire is safe and auditable. Check `dependents` first.
+the retire is safe and auditable. Check `dependents` first. To bring it back, use a
+reactivating claim (`claim(..., reactivate=True)`) — a plain claim refuses.
 
 ```python
 svc.dependents(old_barrel)          # see who'd be affected

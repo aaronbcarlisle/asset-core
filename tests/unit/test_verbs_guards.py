@@ -25,6 +25,31 @@ def test_rename_unknown_asset_raises(rs):
         verbs.rename(repo, sink, uuid4(), "X", "pat")
 
 
+def test_claim_on_deprecated_asset_refused_without_reactivate(rs):
+    repo, sink = rs
+    a = verbs.declare(repo, sink, "prop", "amy")
+    verbs.claim(repo, sink, a, "Barrel", "props/barrel", "pat")
+    verbs.deprecate(repo, sink, a, "pat")
+    with pytest.raises(ValueError, match="deprecated"):
+        verbs.claim(repo, sink, a, "Barrel", "props/barrel", "pat")   # no reactivate
+    from assetcore.core.types import Lifecycle
+    assert repo.get_asset(a).lifecycle == Lifecycle.DEPRECATED         # stays retired
+
+
+def test_claim_reactivate_resurrects_deprecated_asset(rs):
+    repo, sink = rs
+    from assetcore.core.types import Lifecycle
+    a = verbs.declare(repo, sink, "prop", "amy")
+    verbs.claim(repo, sink, a, "Barrel", "props/barrel", "pat")
+    verbs.deprecate(repo, sink, a, "pat")
+    verbs.claim(repo, sink, a, "Barrel Redux", "props/barrel", "pat", reactivate=True)
+    assert repo.get_asset(a).lifecycle == Lifecycle.ACTIVE
+    assert repo.get_identity(a).display_name == "Barrel Redux"
+    # the resurrection is auditable on the event
+    claimed = [e for e in sink.events if e.event_type == "identity.claimed"]
+    assert claimed[-1].payload["reactivated"] is True
+
+
 def test_claim_with_no_attrs_resets_attributes(rs):
     repo, sink = rs
     a = verbs.declare(repo, sink, "prop", "amy")

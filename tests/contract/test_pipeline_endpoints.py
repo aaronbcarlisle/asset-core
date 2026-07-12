@@ -72,6 +72,22 @@ def test_deprecate_over_http(make_client):
     assert prod.resolve(a)["meta"]["lifecycle"] == "deprecated"
 
 
+def test_claim_deprecated_is_409_without_reactivate(make_client):
+    import httpx
+    artist, prod = make_client("artist-token"), make_client("prod-token")
+    a = artist.declare("prop", "amy")
+    prod.claim(a, "Old", "props/x", "pat")
+    prod.deprecate(a, "pat")
+
+    with pytest.raises(httpx.HTTPStatusError) as exc:
+        prod.claim(a, "Reborn", "props/x", "pat")           # no reactivate
+    assert exc.value.response.status_code == 409
+    assert prod.resolve(a)["meta"]["lifecycle"] == "deprecated"   # unchanged
+
+    prod.claim(a, "Reborn", "props/x", "pat", reactivate=True)    # explicit
+    assert prod.resolve(a)["meta"]["lifecycle"] == "active"
+
+
 def test_stale_derivations_over_http(make_client):
     c = make_client("artist-token")
     hi = c.declare("sculpt", "amy")

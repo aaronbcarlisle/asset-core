@@ -24,6 +24,7 @@ class ClaimRequest(BaseModel):
     taxonomy: str
     actor: str
     attributes: dict = Field(default_factory=dict)
+    reactivate: bool = False   # required to claim (resurrect) a DEPRECATED asset
 
 
 class RenameRequest(BaseModel):

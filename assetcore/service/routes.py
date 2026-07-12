@@ -138,7 +138,11 @@ async def resolve(asset_id: UUID, service: AssetcoreService = Depends(get_servic
 async def claim(asset_id: UUID, body: ClaimRequest, service: AssetcoreService = Depends(get_service),
                 _: str = Depends(auth.require(auth.PRODUCTION))) -> Response:
     _require_asset(service, asset_id)
-    service.claim(asset_id, body.display_name, body.taxonomy, body.actor, **body.attributes)
+    try:
+        service.claim(asset_id, body.display_name, body.taxonomy, body.actor,
+                      reactivate=body.reactivate, **body.attributes)
+    except ValueError as exc:   # claiming a deprecated asset without reactivate=True
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return Response(status_code=204)
 
 
