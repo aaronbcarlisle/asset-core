@@ -228,6 +228,18 @@ without touching the core design:
   `VersionConflict`; the event log is bounded with explicit resume-gap signalling;
   `list`/`worklist`/`metrics` use batch getters + pagination (no N+1); auth can
   fail closed (`ASSETCORE_REQUIRE_TOKENS`) and every request is logged with an id.
+
+## Post-audit follow-ups (the formerly-deferred items)
+
+- [x] **`find_similar` at scale** — `AssetRepo.search_candidates` narrows
+      candidates through an index (SQLite FTS5 mirror table; Postgres `pg_trgm`
+      GIN via migration `0002`, best-effort at bootstrap) and the pure
+      `similarity_score` still ranks, so semantics are unchanged while a large
+      catalog is never streamed through Python.
+- [x] **Durable multi-process event spine** — `PostgresBroadcastSink` (durable
+      `event` table + LISTEN/NOTIFY fan-out) powers `/events` with restart- and
+      worker-proof `Last-Event-ID` resume; sinks are config-selected providers
+      (`[sinks.main]` in assetcore.toml; `broadcast` stays the in-process default).
 - **API clarity:** the single-file prototype moved to `examples/prototype/` and
   `import assetcore` now surfaces the modern client; the hub CLI moved to L3
   (`sdk/hub_cli.py`) with a 4th import-linter contract forbidding sdk→integrations;

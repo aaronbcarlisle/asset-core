@@ -28,25 +28,32 @@ def create_app(
     sink: EventSink | None = None,
     tokens: dict[str, str] | None = None,
 ) -> FastAPI:
-    if repo is None:
+    if repo is None or sink is None:
         # backend selection is config-driven (no if/elif): build through the same
-        # provider registry the trackers use. ASSETCORE_CONFIG names a repo in the
-        # toml; absent that, the runnable-here default (sqlite :memory:) — still via
-        # the registry, so there's one mechanism for every service swap.
-        import assetcore.infra._providers  # noqa: F401 — runs repo registrations
+        # provider registry the trackers use. ASSETCORE_CONFIG names a repo/sink in
+        # the toml; absent that, the runnable-here defaults (sqlite :memory: + the
+        # in-process BroadcastSink) — still via the registry for the repo, so there
+        # is one mechanism for every service swap.
+        import assetcore.infra._providers  # noqa: F401 — runs repo/sink registrations
         from assetcore.sdk import providers
 
         cfg_path = os.environ.get("ASSETCORE_CONFIG")
+        settings = None
         if cfg_path:
             from assetcore.sdk.settings import Settings
             settings = Settings.load(cfg_path)
-            settings.validate(["repo"])   # fail fast on a bad repo config at startup
-            repo = settings.repo("main")
-        else:
-            repo = providers.build("repo", "sqlite",
-                                   {"path": os.environ.get("ASSETCORE_SQLITE_PATH", ":memory:")})
-    if sink is None:
-        sink = BroadcastSink()
+            settings.validate(["repo", "sink"])  # fail fast on a bad config at startup
+        if repo is None:
+            if settings is not None:
+                repo = settings.repo("main")
+            else:
+                repo = providers.build("repo", "sqlite",
+                                       {"path": os.environ.get("ASSETCORE_SQLITE_PATH", ":memory:")})
+        if sink is None:
+            if settings is not None and settings.has_section("sinks"):
+                sink = settings.sink("main")
+            else:
+                sink = BroadcastSink()
 
     app = FastAPI(title="assetcore", version="0.1.0",
                   summary="Identity-first asset management — the only door (L2).")

@@ -34,6 +34,7 @@ _ENV_REF = re.compile(r"\$\{([^}]+)\}")
 _SECTIONS: dict[str, str] = {
     "trackers": "tracker",
     "repos": "repo",
+    "sinks": "sink",
     "source_vcs": "source_vcs",
     "runtime_store": "runtime_store",
 }
@@ -107,6 +108,13 @@ class Settings:
 
     def repo(self, instance: str = "main"):
         return self._get("repos", instance)
+
+    def sink(self, instance: str = "main"):
+        return self._get("sinks", instance)
+
+    def has_section(self, section: str) -> bool:
+        """True when the config declares `section` (e.g. optional [sinks.*])."""
+        return section in self._config
 
     def source_vcs(self, instance: str = "main"):
         return self._get("source_vcs", instance)

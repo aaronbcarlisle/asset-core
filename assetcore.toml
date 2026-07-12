@@ -18,6 +18,17 @@ path = "${ASSETCORE_SQLITE_PATH}"   # empty -> SqliteRepo falls back to :memory:
 #   [repos.main.config]
 #   dsn = "${ASSETCORE_DSN}"
 
+# --- event sink: the spine (optional section; omit for the in-process default) --
+[sinks.main]
+provider = "broadcast"              # one of: broadcast | postgres
+[sinks.main.config]
+# max_log = 10000                   # broadcast: bounded in-memory log size
+# to make the spine durable + multi-process (SSE resume survives restarts):
+#   [sinks.main]
+#   provider = "postgres"
+#   [sinks.main.config]
+#   dsn = "${ASSETCORE_DSN}"
+
 # --- production tracker: a VIEW over identity (ShotGrid / Jira / ftrack) --------
 [trackers.production]
 provider = "shotgrid"               # which TrackerAdapter implementation

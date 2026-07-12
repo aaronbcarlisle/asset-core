@@ -123,13 +123,24 @@ raise SystemExit(run(adapter, threshold=100.0))   # non-zero exit fails the buil
   - `NotifySink.emit` skips only the NOTIFY *hint* when a payload exceeds Postgres's
     8000-byte limit (logs a warning); the durable row is still written and
     subscribers catch up from the table by seq.
-- In production, `infra/notify_sink.NotifySink` is the `EventSink` for the *emit*
-  side (durable `event` table + Postgres NOTIFY) — a clean swap for BroadcastSink's
-  emit. It does **not** implement the subscribe/stream API, so it does not by
-  itself power the `/events` SSE endpoint: that needs a small LISTEN→queue bridge
-  process (or keep BroadcastSink for live SSE and NotifySink for the durable
-  cross-process log). `/events` returns 501 if handed a non-subscribable sink, so
-  the degradation is explicit rather than a runtime break.
+- **Durable + multi-process spine:** `infra/postgres_broadcast_sink.
+  PostgresBroadcastSink` is the production swap — emit writes the durable `event`
+  table (BIGSERIAL id = the seq, which **survives restarts**) + a NOTIFY hint; a
+  single LISTEN connection fans live events out to SSE subscribers; catch-up
+  replays from the table, so `Last-Event-ID` resume works across restarts and
+  workers, and `has_gap` is always false (the table never evicts). Select it in
+  `assetcore.toml`:
+
+  ```toml
+  [sinks.main]
+  provider = "postgres"
+  [sinks.main.config]
+  dsn = "${ASSETCORE_DSN}"
+  ```
+
+- `infra/notify_sink.NotifySink` remains the emit-only building block (the
+  broadcast sink composes it). `/events` returns 501 if handed a non-subscribable
+  sink, so a misconfiguration degrades explicitly rather than breaking at runtime.
 
 ## Backup / restore of the binding DB
 
