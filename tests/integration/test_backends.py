@@ -60,6 +60,46 @@ def test_scenario_on_backend(scenario, make_backend):
 
 
 @pytest.mark.parametrize("make_backend", BACKENDS)
+def test_search_candidates_narrowing_contract(make_backend):
+    from assetcore.app import verbs
+    repo, sink = make_backend()
+    try:
+        b1 = verbs.declare(repo, sink, "prop", "amy")
+        verbs.claim(repo, sink, b1, "Weathered Barrel", "props/containers/barrel", "pat")
+        b2 = verbs.declare(repo, sink, "prop", "ben")
+        verbs.claim(repo, sink, b2, "Mossy Barrel", "props/containers/barrel", "pat")
+        crate = verbs.declare(repo, sink, "prop", "amy")
+        verbs.claim(repo, sink, crate, "Wooden Crate", "props/containers/crate", "pat")
+        tagged = verbs.declare(repo, sink, "material", "mo")
+        verbs.claim(repo, sink, tagged, "Oak Planks", "mat/wood", "pat")
+        ident = repo.get_identity(tagged)
+        ident.tags = ["barrel", "stave"]
+        repo.save_identity(ident)                      # tag-only match
+        unclaimed = verbs.declare(repo, sink, "prop", "amy")   # blank identity
+
+        got = {a.id for a, _i in repo.search_candidates("barrel")}
+        assert {b1, b2, tagged} <= got                 # name + tag matches surface
+        assert crate not in got and unclaimed not in got
+
+        typed = {a.id for a, _i in repo.search_candidates("barrel", asset_type="prop")}
+        assert typed == {b1, b2}                       # type filter applies
+
+        assert repo.search_candidates("") == []        # no tokens -> no candidates
+        # a rename + re-file is reflected (the index follows save_identity)
+        verbs.rename(repo, sink, b1, "Weathered Cask", "pat",
+                     new_taxonomy="props/containers/cask")
+        got = {a.id for a, _i in repo.search_candidates("barrel", asset_type="prop")}
+        assert got == {b2}
+        # find_similar output is consistent through the narrowed path
+        hits = verbs.find_similar(repo, "barrel", asset_type="prop")
+        assert [a.id for a, _i, _s in hits] == [b2]
+    finally:
+        close = getattr(repo, "close", None)
+        if close is not None:
+            close()
+
+
+@pytest.mark.parametrize("make_backend", BACKENDS)
 def test_batch_getters_and_created_by_filter(make_backend):
     from assetcore.app import verbs
     repo, sink = make_backend()

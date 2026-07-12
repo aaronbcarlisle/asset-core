@@ -148,6 +148,22 @@ def test_floating_dependencies_flags_float_and_unset_not_pin():
     assert floating == {m, u}      # float + unset flagged; pin + non-DEPENDS_ON not
 
 
+# --- is_similarity_candidate (the narrowing contract) -----------------------
+def test_candidate_on_name_taxonomy_and_tags():
+    a, ident = _asset_with("Weathered Barrel", "props/containers/barrel", tags=["harbor"])
+    assert rules.is_similarity_candidate("barrel", ident) is True
+    assert rules.is_similarity_candidate("containers", ident) is True   # taxonomy token
+    assert rules.is_similarity_candidate("harbor", ident) is True       # tag token
+    assert rules.is_similarity_candidate("spaceship", ident) is False
+
+
+def test_candidate_never_matches_none_or_blank_identity():
+    from assetcore.core.entities import IdentityFacet
+    from uuid import uuid4
+    assert rules.is_similarity_candidate("barrel", None) is False
+    assert rules.is_similarity_candidate("barrel", IdentityFacet(asset_id=uuid4())) is False
+
+
 # --- similarity_score (the dedupe nudge) ------------------------------------
 def _asset_with(name, taxonomy="", asset_type="prop", tags=None, origin=None):
     a = Asset(asset_type=asset_type, created_by="amy", origin=origin or {})

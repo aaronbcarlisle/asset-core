@@ -5,13 +5,19 @@ infra/schema.sql (used here in its native PG dialect). psycopg2 is imported
 lazily so SQLite/in-memory users need no driver, and the contract is identical:
 same ports, same one-latest-on-write invariant, same UNIQUE-edge guard.
 
-NOTE: this backend is code-complete but exercised only when a Postgres instance
-is available — tests/integration skips it unless ASSETCORE_TEST_DSN is set and
-psycopg2 is installed. Everything below mirrors the SQLite implementation that IS
-covered, so the port contract is what's really being proven.
+Concurrency: connections come from a ThreadedConnectionPool — each method checks
+one out for exactly its (per-method-atomic) transaction and returns it, so the
+repo is safe to call from multiple threads and never serializes all work through
+one connection. `SUPPORTS_CONCURRENCY = True` tells the service layer it may run
+repo calls in a threadpool instead of on the event loop (see service/routes).
+
+Gated behind ASSETCORE_TEST_DSN + psycopg2 in tests/integration (the CI postgres
+job runs them).
 """
+import contextlib
 import pathlib
 import re
+import time
 from uuid import UUID
 
 from assetcore.core.entities import (
@@ -42,28 +48,79 @@ _TABLES = (
 class PostgresRepo:
     """Satisfies core.ports.AssetRepo."""
 
-    def __init__(self, dsn: str) -> None:
+    # pooled, per-call connection checkout: safe to call from worker threads, so
+    # the service layer may offload repo work off the event loop.
+    SUPPORTS_CONCURRENCY = True
+
+    # how long a checkout waits for a free pooled connection before giving up —
+    # graceful backpressure instead of an instant PoolError under a burst.
+    _CHECKOUT_TIMEOUT_S = 5.0
+    _CHECKOUT_RETRY_S = 0.05
+
+    def __init__(self, dsn: str, min_conn: int = 1, max_conn: int = 10) -> None:
         import psycopg2
         import psycopg2.extras
+        import psycopg2.pool
         self._psycopg2 = psycopg2
         self._Json = psycopg2.extras.Json
         self._dict_cursor = psycopg2.extras.RealDictCursor
         psycopg2.extras.register_uuid()          # UUID <-> Python uuid.UUID
-        self.conn = psycopg2.connect(dsn)
-        with self.conn, self.conn.cursor() as cur:
+        self._pool = psycopg2.pool.ThreadedConnectionPool(min_conn, max_conn, dsn)
+        with self._conn() as conn, conn, conn.cursor() as cur:
             cur.execute(_BOOTSTRAP_DDL)
+        self._init_trgm_indexes()
+
+    @contextlib.contextmanager
+    def _conn(self):
+        """Check a connection out of the pool for one operation, always return it.
+
+        putconn rolls back any open transaction, so a connection never goes back
+        dirty. When the pool is exhausted we wait (bounded) rather than failing
+        instantly — a burst degrades to queueing, not errors.
+        """
+        deadline = time.monotonic() + self._CHECKOUT_TIMEOUT_S
+        while True:
+            try:
+                conn = self._pool.getconn()
+                break
+            except self._psycopg2.pool.PoolError:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(self._CHECKOUT_RETRY_S)
+        try:
+            yield conn
+        finally:
+            self._pool.putconn(conn)
+
+    def _init_trgm_indexes(self) -> None:
+        """Best-effort pg_trgm GIN indexes for search_candidates' ILIKE narrowing.
+
+        CREATE EXTENSION needs privileges we may not have (same reason the
+        bootstrap strips pgcrypto); without them the ILIKE queries still return
+        correct results, just unindexed — so failure here degrades performance,
+        never correctness. The managed path is alembic migration 0002.
+        """
+        try:
+            with self._conn() as conn, conn, conn.cursor() as cur:
+                cur.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
+                cur.execute("CREATE INDEX IF NOT EXISTS identity_name_trgm"
+                            " ON facet_identity USING gin (display_name gin_trgm_ops)")
+                cur.execute("CREATE INDEX IF NOT EXISTS identity_taxonomy_trgm"
+                            " ON facet_identity USING gin (taxonomy gin_trgm_ops)")
+        except self._psycopg2.Error:
+            pass   # unprivileged server: run unindexed (correct, slower)
 
     def close(self) -> None:
-        self.conn.close()
+        self._pool.closeall()
 
     def reset(self) -> None:
         """Truncate every table — used by the integration suite for isolation."""
-        with self.conn, self.conn.cursor() as cur:
+        with self._conn() as conn, conn, conn.cursor() as cur:
             cur.execute("TRUNCATE " + ", ".join(_TABLES) + " RESTART IDENTITY CASCADE")
 
     # --- identity ---
     def create_asset(self, asset: Asset, identity: IdentityFacet) -> None:
-        with self.conn, self.conn.cursor() as cur:
+        with self._conn() as conn, conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO asset (id, lifecycle, asset_type, created_at, created_by, origin)"
                 " VALUES (%s, %s, %s, %s, %s, %s)",
@@ -143,6 +200,38 @@ class PostgresRepo:
             version_num=r["version_num"], is_latest=r["is_latest"], cooked_at=r["cooked_at"],
         ) for r in rows}
 
+    def search_candidates(self, query: str, asset_type: str | None = None,
+                          limit: int = 200) -> list[tuple[Asset, IdentityFacet]]:
+        import re as _re
+        tokens = _re.findall(r"[a-z0-9]+", query.lower())
+        if not tokens:
+            return []
+        # ILIKE-per-token is a SUPERSET of the token-overlap narrowing contract
+        # (substring ⊇ exact token); the verb re-ranks and drops score-0 rows, so
+        # results match the other backends. tokens are [a-z0-9]+ — no LIKE
+        # metacharacters to escape. The trgm GIN indexes accelerate the ILIKEs.
+        patterns = [f"%{t}%" for t in tokens]
+        sql = ("SELECT a.id, a.lifecycle, a.asset_type, a.created_at, a.created_by, a.origin,"
+               "       fi.asset_id, fi.display_name, fi.taxonomy, fi.status, fi.tags, fi.attributes"
+               " FROM facet_identity fi JOIN asset a ON a.id = fi.asset_id"
+               " WHERE (fi.display_name ILIKE ANY(%s) OR fi.taxonomy ILIKE ANY(%s)"
+               "        OR array_to_string(fi.tags, ' ') ILIKE ANY(%s))")
+        params: list = [patterns, patterns, patterns]
+        if asset_type is not None:
+            sql += " AND a.asset_type = %s"
+            params.append(asset_type)
+        sql += " LIMIT %s"
+        params.append(limit)
+        out = []
+        for r in self._all(sql, tuple(params)):
+            out.append((Asset(asset_type=r["asset_type"], created_by=r["created_by"],
+                              id=r["id"], lifecycle=Lifecycle(r["lifecycle"]),
+                              origin=r["origin"], created_at=r["created_at"]),
+                        IdentityFacet(asset_id=r["asset_id"], display_name=r["display_name"],
+                                      taxonomy=r["taxonomy"], status=r["status"],
+                                      tags=list(r["tags"]), attributes=r["attributes"])))
+        return out
+
     def get_identity(self, asset_id: UUID) -> IdentityFacet | None:
         row = self._one("SELECT * FROM facet_identity WHERE asset_id = %s", (asset_id,))
         if row is None:
@@ -153,7 +242,7 @@ class PostgresRepo:
         )
 
     def save_identity(self, identity: IdentityFacet) -> None:
-        with self.conn, self.conn.cursor() as cur:
+        with self._conn() as conn, conn, conn.cursor() as cur:
             cur.execute(
                 "UPDATE facet_identity SET display_name=%s, taxonomy=%s, status=%s, tags=%s, attributes=%s"
                 " WHERE asset_id=%s",
@@ -162,7 +251,7 @@ class PostgresRepo:
             )
 
     def set_lifecycle(self, asset_id: UUID, lifecycle: Lifecycle) -> None:
-        with self.conn, self.conn.cursor() as cur:
+        with self._conn() as conn, conn, conn.cursor() as cur:
             cur.execute("UPDATE asset SET lifecycle=%s WHERE id=%s",
                         (Lifecycle(lifecycle).value, asset_id))
 
@@ -176,7 +265,7 @@ class PostgresRepo:
     # --- source facet ---
     def add_source_version(self, v: SourceVersion) -> None:
         try:
-            with self.conn, self.conn.cursor() as cur:   # demote + insert in one tx
+            with self._conn() as conn, conn, conn.cursor() as cur:   # demote + insert in one tx
                 cur.execute(
                     "UPDATE facet_source_version SET is_latest=FALSE WHERE asset_id=%s AND is_latest",
                     (v.asset_id,))
@@ -192,7 +281,7 @@ class PostgresRepo:
 
     def update_source_location(self, asset_id: UUID, new_location_uri: str,
                                new_revision: str | None = None) -> bool:
-        with self.conn, self.conn.cursor() as cur:   # in-place move of the latest version
+        with self._conn() as conn, conn, conn.cursor() as cur:   # in-place move of the latest version
             if new_revision is None:
                 cur.execute("UPDATE facet_source_version SET location_uri=%s"
                             " WHERE asset_id=%s AND is_latest", (new_location_uri, asset_id))
@@ -217,7 +306,7 @@ class PostgresRepo:
     # --- runtime facet ---
     def add_runtime_version(self, v: RuntimeVersion) -> None:
         try:
-            with self.conn, self.conn.cursor() as cur:
+            with self._conn() as conn, conn, conn.cursor() as cur:
                 cur.execute(
                     "UPDATE facet_runtime_version SET is_latest=FALSE WHERE asset_id=%s AND is_latest",
                     (v.asset_id,))
@@ -231,7 +320,7 @@ class PostgresRepo:
             self._as_version_conflict(exc)
 
     def update_runtime_location(self, asset_id: UUID, new_location_uri: str) -> bool:
-        with self.conn, self.conn.cursor() as cur:
+        with self._conn() as conn, conn, conn.cursor() as cur:
             cur.execute("UPDATE facet_runtime_version SET location_uri=%s"
                         " WHERE asset_id=%s AND is_latest", (new_location_uri, asset_id))
             return cur.rowcount > 0
@@ -250,7 +339,7 @@ class PostgresRepo:
     # --- relationships ---
     def add_relationship(self, r: Relationship) -> None:
         try:
-            with self.conn, self.conn.cursor() as cur:
+            with self._conn() as conn, conn, conn.cursor() as cur:
                 cur.execute(
                     "INSERT INTO relationship"
                     " (from_asset, to_asset, rel_type, binding_mode, pinned_version, attributes)"
@@ -267,7 +356,7 @@ class PostgresRepo:
             ) from exc
 
     def upsert_relationship(self, r: Relationship) -> None:
-        with self.conn, self.conn.cursor() as cur:
+        with self._conn() as conn, conn, conn.cursor() as cur:
             cur.execute(
                 "INSERT INTO relationship"
                 " (from_asset, to_asset, rel_type, binding_mode, pinned_version, attributes)"
@@ -316,11 +405,11 @@ class PostgresRepo:
 
     # --- query helpers ---
     def _one(self, sql: str, params: tuple):
-        with self.conn.cursor(cursor_factory=self._dict_cursor) as cur:
+        with self._conn() as conn, conn, conn.cursor(cursor_factory=self._dict_cursor) as cur:
             cur.execute(sql, params)
             return cur.fetchone()
 
     def _all(self, sql: str, params: tuple) -> list:
-        with self.conn.cursor(cursor_factory=self._dict_cursor) as cur:
+        with self._conn() as conn, conn, conn.cursor(cursor_factory=self._dict_cursor) as cur:
             cur.execute(sql, params)
             return cur.fetchall()

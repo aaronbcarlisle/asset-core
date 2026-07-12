@@ -130,6 +130,23 @@ def _tokens(text: str | None) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", (text or "").lower()))
 
 
+def is_similarity_candidate(query: str, identity: IdentityFacet | None) -> bool:
+    """Cheap candidate test for the dedupe nudge: does the query share a token with
+    the identity's human-facing text (display_name / taxonomy / tags)?
+
+    This is the NARROWING contract `AssetRepo.search_candidates` implements — SQL
+    backends accelerate exactly this with an index (FTS5 / pg_trgm) and the
+    in-memory repo evaluates it directly, so all backends surface the same
+    candidates. Ranking stays `similarity_score` (which also weighs asset_type and
+    origin); narrowing keys only on the identity text a human would search by.
+    """
+    if identity is None:
+        return False
+    haystack = " ".join(filter(None, [identity.display_name, identity.taxonomy,
+                                      " ".join(identity.tags)]))
+    return bool(_tokens(query) & _tokens(haystack))
+
+
 def similarity_score(query: str, asset: Asset, identity: IdentityFacet) -> int:
     """How many query tokens an existing asset shares — the dedupe NUDGE.
 

@@ -54,19 +54,30 @@ ASSETCORE_DSN=postgresql://user:pass@host/assetcore alembic -c assetcore/db/alem
 > drift. A future cleanup can have `postgres_repo` bootstrap via Alembic so there
 > is a single source.
 
-## Authentication (dev-grade — fail closed in prod)
+## Authentication (pluggable: static tokens or verified JWT)
 
-Auth is a token→authority map (`X-Assetcore-Token` header). The built-in defaults
-(`prod-token`, `artist-token`, `engine-token`, `build-token`) are **well-known dev
-tokens** — convenient locally, dangerous exposed.
+Auth is a config-selected provider (`[auth.main]` in `assetcore.toml`):
+
+**`static` (default)** — a token→authority map (`X-Assetcore-Token` header).
+The built-in defaults (`prod-token`, …) are **well-known dev tokens**:
 
 - Set `ASSETCORE_TOKENS` (JSON `{"<token>": "<authority>"}`) to your real tokens.
-- If it's unset the service logs a loud warning and falls back to the dev tokens.
+- If unset the service logs a loud warning and falls back to the dev tokens.
 - Set `ASSETCORE_REQUIRE_TOKENS=1` to **fail startup** rather than fall back — the
-  production-safe posture (a misconfigured deploy refuses to run with dev tokens).
+  production-safe posture.
 
-Signed identities / real RBAC are out of scope here (they need a studio identity
-decision — OIDC/LDAP); `ASSETCORE_REQUIRE_TOKENS` closes the immediate hole.
+**`jwt` (verified identity)** — `Authorization: Bearer <JWT>` validated for
+signature (shared `secret` or an OIDC `jwks_url`), `issuer`, `audience`, and
+expiry; a configurable roles claim maps onto the four authorities via
+`role_map`. IdP-agnostic (anything that mints a JWT). Needs the `auth` extra
+(`pip install "assetcore[auth]"`). Under jwt the token's `sub` (configurable)
+becomes the **verified actor recorded on writes** — it overrides any
+caller-supplied `actor`/`published_by`, so provenance is proof, not a
+self-reported string. See the commented `[auth.main]` block in `assetcore.toml`.
+
+The permission model stays the four coarse authorities (they mirror facet
+sovereignty — per-asset ACLs would fight it); `role_map` translates your IdP's
+group names onto them.
 
 ## Request correlation
 
@@ -123,13 +134,38 @@ raise SystemExit(run(adapter, threshold=100.0))   # non-zero exit fails the buil
   - `NotifySink.emit` skips only the NOTIFY *hint* when a payload exceeds Postgres's
     8000-byte limit (logs a warning); the durable row is still written and
     subscribers catch up from the table by seq.
-- In production, `infra/notify_sink.NotifySink` is the `EventSink` for the *emit*
-  side (durable `event` table + Postgres NOTIFY) — a clean swap for BroadcastSink's
-  emit. It does **not** implement the subscribe/stream API, so it does not by
-  itself power the `/events` SSE endpoint: that needs a small LISTEN→queue bridge
-  process (or keep BroadcastSink for live SSE and NotifySink for the durable
-  cross-process log). `/events` returns 501 if handed a non-subscribable sink, so
-  the degradation is explicit rather than a runtime break.
+- **Durable + multi-process spine:** `infra/postgres_broadcast_sink.
+  PostgresBroadcastSink` is the production swap — emit writes the durable `event`
+  table (BIGSERIAL id = the seq, which **survives restarts**) + a NOTIFY hint; a
+  single LISTEN connection fans live events out to SSE subscribers; catch-up
+  replays from the table, so `Last-Event-ID` resume works across restarts and
+  workers, and `has_gap` is always false (the table never evicts). Select it in
+  `assetcore.toml`:
+
+  ```toml
+  [sinks.main]
+  provider = "postgres"
+  [sinks.main.config]
+  dsn = "${ASSETCORE_DSN}"
+  ```
+
+- `infra/notify_sink.NotifySink` remains the emit-only building block (the
+  broadcast sink composes it). `/events` returns 501 if handed a non-subscribable
+  sink, so a misconfiguration degrades explicitly rather than breaking at runtime.
+
+## Concurrency model
+
+- **SQLite + BroadcastSink (the zero-setup default):** one shared connection, an
+  in-process queue — all DB work runs inline on the event loop, single-threaded by
+  design. Fine for dev and small deployments.
+- **Pooled Postgres (+ postgres sink):** `PostgresRepo` checks a connection out of
+  a `ThreadedConnectionPool` per operation (`min_conn`/`max_conn` in
+  `[repos.main.config]`; exhaustion queues briefly instead of erroring), and both
+  it and `PostgresBroadcastSink` declare `SUPPORTS_CONCURRENCY`, so the service
+  runs DB work in the threadpool — a slow query no longer blocks the event loop
+  and requests execute concurrently. The switch is automatic
+  (`app.state.offload_db`); a mixed combo (e.g. postgres repo + in-process sink)
+  stays inline because the in-process sink is loop-confined.
 
 ## Backup / restore of the binding DB
 

@@ -20,17 +20,21 @@ class DeclareRequest(BaseModel):
     origin: dict = Field(default_factory=dict)
 
 
+# Actor fields are optional on the wire: a VERIFIED subject (jwt auth) always
+# overrides them, and under static auth an omitted actor falls back to the
+# authority — see service.auth.resolve_actor. Existing clients that send them
+# keep working unchanged.
 class ClaimRequest(BaseModel):
     display_name: str
     taxonomy: str
-    actor: str
+    actor: str | None = None
     attributes: dict = Field(default_factory=dict)
     reactivate: bool = False   # required to claim (resurrect) a DEPRECATED asset
 
 
 class RenameRequest(BaseModel):
     new_name: str
-    actor: str
+    actor: str | None = None
     new_taxonomy: str | None = None
 
 
@@ -38,7 +42,7 @@ class BindSourceRequest(BaseModel):
     location_uri: str
     tool: str
     revision: str
-    published_by: str
+    published_by: str | None = None
 
 
 class BindRuntimeRequest(BaseModel):
@@ -66,13 +70,13 @@ class SetBindingRequest(BaseModel):
 
 class RelocateRequest(BaseModel):
     new_location_uri: str
-    actor: str
+    actor: str | None = None
     facet: str = "source"          # 'source' | 'runtime'
     new_revision: str | None = None
 
 
 class DeprecateRequest(BaseModel):
-    actor: str
+    actor: str | None = None
 
 
 class BulkDeclareRequest(BaseModel):
@@ -86,7 +90,7 @@ class BulkRelateRequest(BaseModel):
 class BulkRelocateItem(BaseModel):
     asset_id: UUID
     new_location_uri: str
-    actor: str
+    actor: str | None = None
     facet: str = "source"
     new_revision: str | None = None
 

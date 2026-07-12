@@ -28,32 +28,58 @@ def create_app(
     sink: EventSink | None = None,
     tokens: dict[str, str] | None = None,
 ) -> FastAPI:
-    if repo is None:
+    if repo is None or sink is None:
         # backend selection is config-driven (no if/elif): build through the same
-        # provider registry the trackers use. ASSETCORE_CONFIG names a repo in the
-        # toml; absent that, the runnable-here default (sqlite :memory:) — still via
-        # the registry, so there's one mechanism for every service swap.
-        import assetcore.infra._providers  # noqa: F401 — runs repo registrations
+        # provider registry the trackers use. ASSETCORE_CONFIG names a repo/sink in
+        # the toml; absent that, the runnable-here defaults (sqlite :memory: + the
+        # in-process BroadcastSink) — still via the registry for the repo, so there
+        # is one mechanism for every service swap.
+        import assetcore.infra._providers  # noqa: F401 — runs repo/sink registrations
         from assetcore.sdk import providers
 
         cfg_path = os.environ.get("ASSETCORE_CONFIG")
+        settings = None
         if cfg_path:
             from assetcore.sdk.settings import Settings
             settings = Settings.load(cfg_path)
-            settings.validate(["repo"])   # fail fast on a bad repo config at startup
-            repo = settings.repo("main")
-        else:
-            repo = providers.build("repo", "sqlite",
-                                   {"path": os.environ.get("ASSETCORE_SQLITE_PATH", ":memory:")})
-    if sink is None:
-        sink = BroadcastSink()
+            settings.validate(["repo", "sink", "auth"])  # fail fast at startup
+        if repo is None:
+            if settings is not None:
+                repo = settings.repo("main")
+            else:
+                repo = providers.build("repo", "sqlite",
+                                       {"path": os.environ.get("ASSETCORE_SQLITE_PATH", ":memory:")})
+        if sink is None:
+            if settings is not None and settings.has_section("sinks"):
+                sink = settings.sink("main")
+            else:
+                sink = BroadcastSink()
+
+    # auth is a provider too (static token map | verified jwt). Config selects it;
+    # absent an [auth.main] section, the static map (explicit `tokens` arg, else
+    # ASSETCORE_TOKENS / dev defaults) keeps the original behavior.
+    auth_provider = None
+    cfg_path = os.environ.get("ASSETCORE_CONFIG")
+    if cfg_path and tokens is None:
+        from assetcore.sdk.settings import Settings
+        cfg = Settings.load(cfg_path)
+        if cfg.has_section("auth"):
+            auth_provider = cfg.auth("main")
+    if auth_provider is None:
+        auth_provider = auth.StaticTokenAuth(tokens if tokens is not None else auth.load_tokens())
 
     app = FastAPI(title="assetcore", version="0.1.0",
                   summary="Identity-first asset management — the only door (L2).")
     app.state.service = AssetcoreService(repo, sink)
     app.state.sink = sink
-    app.state.tokens = tokens if tokens is not None else auth.load_tokens()
+    app.state.auth = auth_provider
     app.state.latency = {"count": 0, "total_ms": 0.0, "max_ms": 0.0}
+    # DB work leaves the event loop only when BOTH ends are thread-safe: the
+    # pooled PostgresRepo checks connections out per call, and the postgres sink
+    # locks its emit connection. SQLite/BroadcastSink are loop-confined by design,
+    # so they keep running inline (single-threaded), exactly as before.
+    app.state.offload_db = bool(getattr(repo, "SUPPORTS_CONCURRENCY", False)
+                                and getattr(sink, "SUPPORTS_CONCURRENCY", False))
 
     @app.middleware("http")
     async def _time_requests(request: Request, call_next):

@@ -36,4 +36,28 @@ def _build_memory(config):
 def _build_postgres(config):
     # lazy so a missing psycopg2 surfaces only when postgres is actually selected
     from assetcore.infra.postgres_repo import PostgresRepo  # noqa: PLC0415
-    return PostgresRepo(config["dsn"])
+    kwargs = {}
+    if config.get("min_conn"):
+        kwargs["min_conn"] = int(config["min_conn"])
+    if config.get("max_conn"):
+        kwargs["max_conn"] = int(config["max_conn"])
+    return PostgresRepo(config["dsn"], **kwargs)
+
+
+# --- event sinks: the spine is a config choice too --------------------------
+@providers.register("sink", "broadcast")
+def _build_broadcast_sink(config):
+    # in-process, bounded log — the single-process/dev default
+    from assetcore.infra.broadcast_sink import BroadcastSink  # noqa: PLC0415
+    kwargs = {}
+    if config.get("max_log"):
+        kwargs["max_log"] = int(config["max_log"])
+    return BroadcastSink(**kwargs)
+
+
+@providers.register("sink", "postgres", requires=["dsn"])
+def _build_postgres_sink(config):
+    # durable event table + LISTEN/NOTIFY fan-out — survives restarts, spans
+    # processes. Lazy import: needs psycopg2 only when actually selected.
+    from assetcore.infra.postgres_broadcast_sink import PostgresBroadcastSink  # noqa: PLC0415
+    return PostgresBroadcastSink(config["dsn"])
