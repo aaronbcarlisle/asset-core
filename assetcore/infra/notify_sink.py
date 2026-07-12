@@ -19,10 +19,24 @@ gated tests/integration/test_postgres_notify.py when ASSETCORE_TEST_DSN is set.
 from __future__ import annotations
 
 import json
+import logging
 
 from assetcore.core.entities import Event
 
 CHANNEL = "assetcore_events"
+
+logger = logging.getLogger(__name__)
+
+# Postgres caps a NOTIFY payload at 8000 bytes; stay under it with margin. The
+# durable `event` table row is always written (the source of truth) — only the
+# low-latency NOTIFY hint is skipped when a payload is too large, and subscribers
+# still catch up from the table by seq.
+_NOTIFY_MAX_BYTES = 7500
+
+
+def _notify_payload_fits(payload_json: str, limit: int = _NOTIFY_MAX_BYTES) -> bool:
+    """True when the JSON NOTIFY payload is within Postgres's per-message limit."""
+    return len(payload_json.encode("utf-8")) <= limit
 
 
 class NotifySink:
@@ -56,8 +70,18 @@ class NotifySink:
             )
             payload["seq"] = cur.fetchone()[0]
             # NOTIFY carries the low-latency hint; subscribers dedupe on event_id
-            # and catch up from the event table by seq on (re)connect.
-            cur.execute(f"NOTIFY {CHANNEL}, %s", (json.dumps(payload),))
+            # and catch up from the event table by seq on (re)connect. Oversized
+            # payloads (Postgres caps NOTIFY at 8000 bytes) would raise and abort the
+            # whole emit — so skip just the hint when too big; the durable row above
+            # is already committed and subscribers still catch up from the table.
+            notify_json = json.dumps(payload)
+            if _notify_payload_fits(notify_json):
+                cur.execute(f"NOTIFY {CHANNEL}, %s", (notify_json,))
+            else:
+                logger.warning(
+                    "event %s payload too large for NOTIFY (%d bytes); wrote durable row, "
+                    "skipped live hint — subscribers catch up from the event table by seq",
+                    payload["event_id"], len(notify_json.encode("utf-8")))
 
     def history(self, after_seq: int = 0) -> list[tuple[int, dict]]:
         """Replay durable events with id (bigserial) > after_seq (reconnect catch-up)."""

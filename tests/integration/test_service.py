@@ -242,3 +242,26 @@ def test_event_source_catch_up_skips_already_seen():
         return [frame]
 
     assert _types(asyncio.run(drive())) == ["source.published"]
+
+
+def test_event_source_emits_gap_when_resume_is_behind_horizon():
+    """Resuming from before the bounded log's horizon yields a `gap` frame first,
+    then whatever is still retained — never a silent miss."""
+    sink = BroadcastSink(max_log=3)
+    for _ in range(5):
+        sink.emit(Event(None, "declared"))     # retains seq 3,4,5; drops 1,2
+
+    class _FakeRequest:
+        async def is_disconnected(self) -> bool:
+            return False
+
+    async def drive() -> list[str]:
+        gen = event_source(sink, _FakeRequest(), after_seq=1)   # behind the horizon
+        frames = [await gen.__anext__() for _ in range(4)]      # gap + seq 3,4,5
+        await gen.aclose()
+        return frames
+
+    frames = asyncio.run(drive())
+    assert frames[0].startswith("event: gap")
+    assert "stream.gap" in frames[0]
+    assert _types(frames) == ["declared", "declared", "declared"]   # the 3 retained

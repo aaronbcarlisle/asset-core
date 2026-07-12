@@ -85,6 +85,20 @@ raise SystemExit(run(adapter, threshold=100.0))   # non-zero exit fails the buil
 - The durable log is the source of truth; the live push (SSE / Postgres NOTIFY) is
   the low-latency hint. A dropped SSE connection resumes by sending the last seq it
   saw as the `Last-Event-ID` header — the server replays the gap, then follows.
+- **BroadcastSink limits (single-process, in-memory).** The in-process
+  BroadcastSink log is bounded (`max_log`, default 10k) and its `seq` **resets on
+  process restart**:
+  - A subscriber resuming from before the retained horizon gets a `gap` SSE frame
+    (`event: gap`, `stream.gap`) and should re-sync from full state — it is *told*,
+    never silently short. Size `max_log` above your worst-case reconnect backlog
+    (`create_app(sink=BroadcastSink(max_log=N))`).
+  - Because `seq` resets on restart and each uvicorn worker has its **own**
+    in-memory sink, BroadcastSink is for **single-process** deployments. Durable,
+    cross-restart, multi-worker resume is the NotifySink (durable `event` table)
+    territory below.
+  - `NotifySink.emit` skips only the NOTIFY *hint* when a payload exceeds Postgres's
+    8000-byte limit (logs a warning); the durable row is still written and
+    subscribers catch up from the table by seq.
 - In production, `infra/notify_sink.NotifySink` is the `EventSink` for the *emit*
   side (durable `event` table + Postgres NOTIFY) — a clean swap for BroadcastSink's
   emit. It does **not** implement the subscribe/stream API, so it does not by
