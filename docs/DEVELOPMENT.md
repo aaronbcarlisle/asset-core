@@ -210,6 +210,10 @@ A second, zero-dependency backstop runs in the normal suite:
 `tests/contract/test_sdk_firewall.py` AST-scans the source so the firewall is
 checked even without import-linter installed.
 
+All three contracts run on every PR and push in CI (`.github/workflows/test.yml`,
+the `lint-imports` step), so `import maya` inside `core/` fails the build
+mechanically — the firewall is a gate, not a convention.
+
 > If a change makes you want to `import maya` inside `core/`, or read a path off
 > disk to establish identity, **stop** — you've found a leak. The fix is almost
 > always a new tool-agnostic concept (a relationship type, a facet field, a
@@ -245,6 +249,20 @@ erroring.
 
 **Cross-backend Postgres run** (optional): stand up a throwaway PG, then
 `ASSETCORE_TEST_DSN=postgresql://... python -m pytest tests/integration/`.
+
+### Continuous integration
+
+`.github/workflows/test.yml` is the real build gate:
+
+- **`suite`** — installs `.[dev]` and runs the full suite + `lint-imports` +
+  `python scripts/validate_config.py assetcore.toml` across Python 3.11 / 3.12 /
+  3.13 (sqlite / in-memory only — the zero-setup path).
+- **`postgres`** — spins up a `postgres:16` service container and runs the same
+  suite with `ASSETCORE_TEST_DSN` set, so the Postgres-backed `postgres_repo`,
+  `notify_sink`, and cross-backend scenario tests (skipped everywhere else)
+  actually execute.
+
+(`docs.yml` separately runs `mkdocs build --strict` as a docs gate.)
 
 ### Hub / offline replay
 
