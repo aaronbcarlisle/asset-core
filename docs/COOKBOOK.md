@@ -145,7 +145,7 @@ aid = c.declare("prop", "amy", origin={"shot": "sq01"})   # authority: artist or
 ```
 
 ```bash
-assetcore declare --type prop --by amy            # prints the id
+assetcore declare --type prop --by amy --origin '{"shot":"sq01"}'   # prints the id
 curl -s -X POST localhost:8000/assets -H 'X-Assetcore-Token: artist-token' \
   -H 'content-type: application/json' \
   -d '{"asset_type":"prop","created_by":"amy","origin":{"shot":"sq01"}}'
@@ -196,7 +196,8 @@ c.claim(aid, "Weathered Barrel", "props/env/barrels", "pat",
 ```
 
 ```bash
-assetcore claim <id> --name "Weathered Barrel" --taxonomy props/env/barrels --actor pat
+assetcore claim <id> --name "Weathered Barrel" --taxonomy props/env/barrels --actor pat \
+  --attr biome=harbor --attr reusable=yes         # --attr is repeatable (authoritative set)
 ```
 
 Claiming a **deprecated** asset resurrects it, which must be deliberate: it is

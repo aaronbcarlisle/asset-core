@@ -139,12 +139,13 @@ def bind_source(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: 
 # BIND_RUNTIME — the build/engine reports where the cooked asset lives.
 # ---------------------------------------------------------------------------
 def bind_runtime(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri: str,
-                 build_id: str) -> int:
+                 build_id: str, actor: str = "build") -> int:
     """The build/engine reports where the cooked asset lives — write RUNTIME.
 
     Adds a new runtime version and returns its version number; the prior latest is
     demoted at write time (the ``one_latest_runtime`` invariant). Emits a
-    ``runtime.cooked`` event.
+    ``runtime.cooked`` event attributed to ``actor`` (the caller's authority, not a
+    hardcoded label).
     """
     # one_latest_runtime invariant is enforced at write time by the repo; a
     # concurrent-version race raises VersionConflict -> re-read + retry (bounded).
@@ -160,7 +161,7 @@ def bind_runtime(repo: AssetRepo, sink: EventSink, asset_id: UUID, location_uri:
             if attempt == _VERSION_WRITE_ATTEMPTS - 1:
                 raise
     sink.emit(Event(asset_id, "runtime.cooked",
-                    {"location_uri": location_uri, "version": v}, "build"))
+                    {"location_uri": location_uri, "version": v}, actor))
     return v
 
 
@@ -212,7 +213,8 @@ def relate(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID, rel_type: RelT
 # SET_BINDING — flip an existing DEPENDS_ON edge float<->pin (consumer's call).
 # ---------------------------------------------------------------------------
 def set_binding(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID,
-                binding_mode: BindingMode, pinned_version: int | None = None) -> None:
+                binding_mode: BindingMode, pinned_version: int | None = None,
+                actor: str = "consumer") -> None:
     """Flip an EXISTING DEPENDS_ON edge between float and pin (the consumer's call).
 
     ``float`` always resolves to the latest authored version; ``pin`` locks to a
@@ -232,7 +234,7 @@ def set_binding(repo: AssetRepo, sink: EventSink, frm: UUID, to: UUID,
     repo.upsert_relationship(r)
     sink.emit(Event(frm, "binding.changed",
                     {"to": str(to), "binding_mode": binding_mode.value,
-                     "pinned_version": pinned_version}, "consumer"))
+                     "pinned_version": pinned_version}, actor))
 
 
 # ---------------------------------------------------------------------------

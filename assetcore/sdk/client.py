@@ -78,9 +78,11 @@ class AssetcoreClient:
             "published_by": published_by,
         }).json()["version"]
 
-    def bind_runtime(self, asset_id: str, location_uri: str, build_id: str) -> int:
+    def bind_runtime(self, asset_id: str, location_uri: str, build_id: str,
+                     actor: str | None = None) -> int:
         return self._post(f"/assets/{asset_id}/runtime",
-                          {"location_uri": location_uri, "build_id": build_id}).json()["version"]
+                          {"location_uri": location_uri, "build_id": build_id,
+                           "actor": actor}).json()["version"]
 
     def relate(self, from_asset: str, to_asset: str, rel_type: str,
                binding_mode: str | None = None, pinned_version: int | None = None,
@@ -91,10 +93,10 @@ class AssetcoreClient:
         })
 
     def set_binding(self, from_asset: str, to_asset: str, binding_mode: str,
-                    pinned_version: int | None = None) -> None:
+                    pinned_version: int | None = None, actor: str | None = None) -> None:
         self._post("/set_binding", {
             "from_asset": from_asset, "to_asset": to_asset,
-            "binding_mode": binding_mode, "pinned_version": pinned_version,
+            "binding_mode": binding_mode, "pinned_version": pinned_version, "actor": actor,
         })
 
     def resolve(self, asset_id: str) -> dict:

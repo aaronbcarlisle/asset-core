@@ -4,6 +4,7 @@ These are the wire contract, kept separate from core entities: the core stays
 framework-free, and this is where the Phase-1 "resolve() returns an untyped dict"
 flag (#3) is closed — ResolveResponse is the typed shape of the three facets.
 """
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -43,6 +44,7 @@ class BindSourceRequest(BaseModel):
 class BindRuntimeRequest(BaseModel):
     location_uri: str
     build_id: str
+    actor: str | None = None      # defaults to the authenticated authority
 
 
 class RelateRequest(BaseModel):
@@ -59,6 +61,7 @@ class SetBindingRequest(BaseModel):
     to_asset: UUID
     binding_mode: BindingMode
     pinned_version: int | None = None
+    actor: str | None = None      # defaults to the authenticated authority
 
 
 class RelocateRequest(BaseModel):
@@ -147,7 +150,7 @@ class AssetSummaryOut(BaseModel):
     id: UUID
     asset_type: str
     created_by: str
-    created_at: str
+    created_at: datetime          # serialized to ISO 8601 by pydantic
     meta: AssetMetaOut | None
     identity: IdentityOut | None
     source: SourceOut | None
@@ -175,7 +178,7 @@ class WorklistItem(BaseModel):
     id: UUID
     asset_type: str
     created_by: str
-    created_at: str
+    created_at: datetime          # serialized to ISO 8601 by pydantic
     origin: dict
     display_name: str | None
 

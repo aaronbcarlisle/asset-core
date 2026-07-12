@@ -115,7 +115,7 @@ async def list_assets(
             id=a["id"],
             asset_type=a["asset_type"],
             created_by=a["created_by"],
-            created_at=a["created_at"].isoformat(),
+            created_at=a["created_at"],
             meta=AssetMetaOut.model_validate(a["meta"]) if a["meta"] else None,
             identity=IdentityOut.model_validate(a["identity"]) if a["identity"] else None,
             source=SourceOut.model_validate(a["source"]) if a["source"] else None,
@@ -194,9 +194,10 @@ async def bind_source(asset_id: UUID, body: BindSourceRequest,
 @router.post("/assets/{asset_id}/runtime", response_model=VersionResponse)
 async def bind_runtime(asset_id: UUID, body: BindRuntimeRequest,
                        service: AssetcoreService = Depends(get_service),
-                       _: str = Depends(auth.require(auth.ENGINE, auth.BUILD))) -> VersionResponse:
+                       authority: str = Depends(auth.require(auth.ENGINE, auth.BUILD))) -> VersionResponse:
     _require_asset(service, asset_id)
-    v = service.bind_runtime(asset_id, body.location_uri, body.build_id)
+    actor = body.actor if body.actor is not None else authority
+    v = service.bind_runtime(asset_id, body.location_uri, body.build_id, actor)
     return VersionResponse(version=v)
 
 
@@ -217,9 +218,11 @@ async def relate(body: RelateRequest, service: AssetcoreService = Depends(get_se
 
 @router.post("/set_binding", status_code=204)
 async def set_binding(body: SetBindingRequest, service: AssetcoreService = Depends(get_service),
-                      _: str = Depends(auth.get_authority)) -> Response:
+                      authority: str = Depends(auth.get_authority)) -> Response:
+    actor = body.actor if body.actor is not None else authority
     try:
-        service.set_binding(body.from_asset, body.to_asset, body.binding_mode, body.pinned_version)
+        service.set_binding(body.from_asset, body.to_asset, body.binding_mode,
+                            body.pinned_version, actor)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return Response(status_code=204)
@@ -302,7 +305,7 @@ async def backfill_worklist(
     return [
         WorklistItem(
             id=asset.id, asset_type=asset.asset_type, created_by=asset.created_by,
-            created_at=asset.created_at.isoformat(), origin=asset.origin,
+            created_at=asset.created_at, origin=asset.origin,
             display_name=identity.display_name if identity else None,
         )
         for asset, identity in service.backfill_worklist(limit=limit, offset=offset)

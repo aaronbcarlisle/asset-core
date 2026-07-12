@@ -31,6 +31,20 @@ def test_global_flags_work_after_subcommand(make_client, capsys):
     assert code == 0 and json.loads(out)["id"] == aid
 
 
+def test_declare_origin_and_claim_attrs(make_client, capsys):
+    artist, prod = make_client("artist-token"), make_client("prod-token")
+    aid = json.loads(call(artist, "--json", "declare", "--type", "prop", "--by", "amy",
+                          "--origin", '{"shot": "sq01"}', capsys=capsys)[1])["id"]
+    # origin round-trips
+    assert artist.resolve(aid)["meta"]["asset_type"] == "prop"
+    assert call(prod, "claim", aid, "--name", "Barrel", "--taxonomy", "props/barrel",
+                "--actor", "pat", "--attr", "biome=harbor", "--attr", "reusable=yes",
+                capsys=capsys)[0] == 0
+    ident = artist.resolve(aid)["identity"]
+    assert ident["display_name"] == "Barrel"
+    assert ident["attributes"] == {"biome": "harbor", "reusable": "yes"}
+
+
 def test_declare_resolve_relate_impact(make_client, capsys):
     artist = make_client("artist-token")
 

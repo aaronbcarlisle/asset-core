@@ -72,16 +72,17 @@ class AssetcoreService:
         return verbs.bind_source(self.repo, self.sink, asset_id, location_uri, tool,
                                  revision, published_by)
 
-    def bind_runtime(self, asset_id: UUID, location_uri: str, build_id: str) -> int:
-        return verbs.bind_runtime(self.repo, self.sink, asset_id, location_uri, build_id)
+    def bind_runtime(self, asset_id: UUID, location_uri: str, build_id: str,
+                     actor: str = "build") -> int:
+        return verbs.bind_runtime(self.repo, self.sink, asset_id, location_uri, build_id, actor)
 
     def relate(self, frm: UUID, to: UUID, rel_type: RelType, actor: str,
                binding_mode: BindingMode | None = None, pinned_version: int | None = None) -> None:
         verbs.relate(self.repo, self.sink, frm, to, rel_type, actor, binding_mode, pinned_version)
 
     def set_binding(self, frm: UUID, to: UUID, binding_mode: BindingMode,
-                    pinned_version: int | None = None) -> None:
-        verbs.set_binding(self.repo, self.sink, frm, to, binding_mode, pinned_version)
+                    pinned_version: int | None = None, actor: str = "consumer") -> None:
+        verbs.set_binding(self.repo, self.sink, frm, to, binding_mode, pinned_version, actor)
 
     def resolve(self, asset_id: UUID) -> dict:
         return verbs.resolve(self.repo, asset_id)

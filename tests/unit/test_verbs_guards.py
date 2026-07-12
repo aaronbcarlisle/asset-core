@@ -67,6 +67,24 @@ def test_set_binding_requires_existing_edge(rs):
         verbs.set_binding(repo, sink, a, b, BindingMode.PIN, pinned_version=1)
 
 
+def test_bind_runtime_records_actor(rs):
+    repo, sink = rs
+    a = verbs.declare(repo, sink, "prop", "amy")
+    verbs.bind_runtime(repo, sink, a, "/Game/a", "build-1", actor="engine:pat")
+    cooked = [e for e in sink.events if e.event_type == "runtime.cooked"][-1]
+    assert cooked.actor == "engine:pat"          # not the hardcoded "build"
+
+
+def test_set_binding_records_actor(rs):
+    repo, sink = rs
+    a = verbs.declare(repo, sink, "anim", "lee")
+    b = verbs.declare(repo, sink, "material", "mo")
+    verbs.relate(repo, sink, a, b, RelType.DEPENDS_ON, "lee", binding_mode=BindingMode.FLOAT)
+    verbs.set_binding(repo, sink, a, b, BindingMode.PIN, pinned_version=1, actor="anim:lee")
+    changed = [e for e in sink.events if e.event_type == "binding.changed"][-1]
+    assert changed.actor == "anim:lee"           # not the hardcoded "consumer"
+
+
 def test_relate_pin_without_version_raises(rs):
     repo, sink = rs
     a = verbs.declare(repo, sink, "anim", "lee")

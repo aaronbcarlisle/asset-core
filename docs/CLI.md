@@ -17,8 +17,8 @@ Run as the installed console script `assetcore …`, or `python -m assetcore.sdk
 | Command | Authority | Purpose |
 |---|---|---|
 | `resolve <id>` | open | the three facets of an asset |
-| `declare --type T --by U` | artist/engine | mint a provisional asset (prints the id) |
-| `claim <id> --name --taxonomy --actor [--reactivate]` | production | give a provisional asset identity (`--reactivate` to resurrect a deprecated one) |
+| `declare --type T --by U [--origin JSON]` | artist/engine | mint a provisional asset (prints the id) |
+| `claim <id> --name --taxonomy --actor [--attr K=V ...] [--reactivate]` | production | give a provisional asset identity (`--attr` sets identity attributes; `--reactivate` resurrects a deprecated one) |
 | `rename <id> --name --actor [--taxonomy]` | production | relabel the identity facet only |
 | `bind-source <id> <uri> --tool --rev --by` | artist | publish the source facet |
 | `bind-runtime <id> <uri> --build` | engine/build | report the runtime facet |
