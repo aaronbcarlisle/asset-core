@@ -17,6 +17,8 @@ path = "${ASSETCORE_SQLITE_PATH}"   # empty -> SqliteRepo falls back to :memory:
 #   provider = "postgres"
 #   [repos.main.config]
 #   dsn = "${ASSETCORE_DSN}"
+#   min_conn = 1        # connection pool bounds (optional; defaults 1 / 10)
+#   max_conn = 10
 
 # --- event sink: the spine (optional section; omit for the in-process default) --
 [sinks.main]

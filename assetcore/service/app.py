@@ -61,6 +61,12 @@ def create_app(
     app.state.sink = sink
     app.state.tokens = tokens if tokens is not None else auth.load_tokens()
     app.state.latency = {"count": 0, "total_ms": 0.0, "max_ms": 0.0}
+    # DB work leaves the event loop only when BOTH ends are thread-safe: the
+    # pooled PostgresRepo checks connections out per call, and the postgres sink
+    # locks its emit connection. SQLite/BroadcastSink are loop-confined by design,
+    # so they keep running inline (single-threaded), exactly as before.
+    app.state.offload_db = bool(getattr(repo, "SUPPORTS_CONCURRENCY", False)
+                                and getattr(sink, "SUPPORTS_CONCURRENCY", False))
 
     @app.middleware("http")
     async def _time_requests(request: Request, call_next):

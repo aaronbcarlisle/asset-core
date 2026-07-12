@@ -38,22 +38,31 @@ _POLL_SECONDS = 1.0     # listener wake-up cadence (also bounds close() latency)
 class PostgresBroadcastSink:
     """Satisfies core.ports.EventSink + the SSE layer's subscribable surface."""
 
+    # emit/history/last_seq serialize on one lock around the shared notify
+    # connection (psycopg2 connections are not concurrency-safe), so the service
+    # layer may call this sink from worker threads.
+    SUPPORTS_CONCURRENCY = True
+
     def __init__(self, dsn: str) -> None:
         self._dsn = dsn
         self._notify = NotifySink(dsn)          # emit + durable history live here
-        self._lock = threading.Lock()
+        self._conn_lock = threading.Lock()      # guards the notify connection
+        self._lock = threading.Lock()           # guards the subscriber map
         self._subscribers: dict[asyncio.Queue, asyncio.AbstractEventLoop] = {}
         self._listener: threading.Thread | None = None
         self._stop = threading.Event()
 
     # --- EventSink port ------------------------------------------------------
     def emit(self, event: Event) -> None:
-        self._notify.emit(event)
+        with self._conn_lock:
+            self._notify.emit(event)
 
     # --- durable log ----------------------------------------------------------
     def history(self, after_seq: int = 0) -> list[tuple[int, dict]]:
+        with self._conn_lock:
+            rows = self._notify.history(after_seq)
         return [(seq, {"event_id": None, **row})     # table rows carry no Event.id
-                for seq, row in self._notify.history(after_seq)]
+                for seq, row in rows]
 
     def has_gap(self, after_seq: int) -> bool:
         return False                               # the table never evicts entries
@@ -64,7 +73,7 @@ class PostgresBroadcastSink:
 
     @property
     def last_seq(self) -> int:
-        with self._notify.conn.cursor() as cur:
+        with self._conn_lock, self._notify.conn.cursor() as cur:
             cur.execute("SELECT COALESCE(MAX(id), 0) FROM event")
             return int(cur.fetchone()[0])
 
@@ -122,4 +131,5 @@ class PostgresBroadcastSink:
         self._stop.set()
         if self._listener is not None:
             self._listener.join(timeout=_POLL_SECONDS * 2)
-        self._notify.conn.close()
+        with self._conn_lock:
+            self._notify.conn.close()

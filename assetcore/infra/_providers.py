@@ -36,7 +36,12 @@ def _build_memory(config):
 def _build_postgres(config):
     # lazy so a missing psycopg2 surfaces only when postgres is actually selected
     from assetcore.infra.postgres_repo import PostgresRepo  # noqa: PLC0415
-    return PostgresRepo(config["dsn"])
+    kwargs = {}
+    if config.get("min_conn"):
+        kwargs["min_conn"] = int(config["min_conn"])
+    if config.get("max_conn"):
+        kwargs["max_conn"] = int(config["max_conn"])
+    return PostgresRepo(config["dsn"], **kwargs)
 
 
 # --- event sinks: the spine is a config choice too --------------------------

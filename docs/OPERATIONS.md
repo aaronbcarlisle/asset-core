@@ -142,6 +142,20 @@ raise SystemExit(run(adapter, threshold=100.0))   # non-zero exit fails the buil
   broadcast sink composes it). `/events` returns 501 if handed a non-subscribable
   sink, so a misconfiguration degrades explicitly rather than breaking at runtime.
 
+## Concurrency model
+
+- **SQLite + BroadcastSink (the zero-setup default):** one shared connection, an
+  in-process queue — all DB work runs inline on the event loop, single-threaded by
+  design. Fine for dev and small deployments.
+- **Pooled Postgres (+ postgres sink):** `PostgresRepo` checks a connection out of
+  a `ThreadedConnectionPool` per operation (`min_conn`/`max_conn` in
+  `[repos.main.config]`; exhaustion queues briefly instead of erroring), and both
+  it and `PostgresBroadcastSink` declare `SUPPORTS_CONCURRENCY`, so the service
+  runs DB work in the threadpool — a slow query no longer blocks the event loop
+  and requests execute concurrently. The switch is automatic
+  (`app.state.offload_db`); a mixed combo (e.g. postgres repo + in-process sink)
+  stays inline because the in-process sink is loop-confined.
+
 ## Backup / restore of the binding DB
 
 **Postgres (production):**

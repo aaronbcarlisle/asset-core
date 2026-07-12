@@ -67,6 +67,23 @@ class DictEntrySink:
         self._queues.remove(q)
 
 
+def test_default_app_keeps_db_work_inline():
+    # sqlite + BroadcastSink are loop-confined: offload must stay off, and
+    # requests must behave exactly as before.
+    import pytest
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from assetcore.infra.sqlite_repo import SqliteRepo
+    from assetcore.service.app import create_app
+
+    app = create_app(repo=SqliteRepo(":memory:", check_same_thread=False), sink=BroadcastSink())
+    assert app.state.offload_db is False
+    tc = TestClient(app)
+    aid = tc.post("/assets", json={"asset_type": "prop", "created_by": "amy"},
+                  headers={"X-Assetcore-Token": "artist-token"}).json()["id"]
+    assert tc.get(f"/assets/{aid}").status_code == 200
+
+
 def test_event_source_serves_dict_entries():
     sink = DictEntrySink()
     sink.emit_dict(1, "declared")
