@@ -280,16 +280,30 @@ class HybridClient:
         rep.close()
         return result
 
-    def declare(self, asset_type: str, actor: str) -> dict:
+    @staticmethod
+    def _blank_record(asset_id: str, asset_type: str | None = None,
+                      created_by: str | None = None) -> dict:
+        """A resolve-shaped record for an asset we only know locally (offline)."""
+        return {
+            "id": asset_id, "asset_type": asset_type, "created_by": created_by,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "meta": {"id": asset_id, "asset_type": asset_type, "lifecycle": "provisional",
+                     "created_by": created_by},
+            "identity": {"display_name": None, "taxonomy": None, "status": None,
+                         "tags": [], "attributes": {}},
+            "source": None, "runtime": None,
+        }
+
+    def declare(self, asset_type: str, created_by: str, origin: dict | None = None) -> dict:
         asset_id = str(uuid.uuid4())                      # durable id, offline or not (spec §5.3)
-        payload = {"id": asset_id, "asset_type": asset_type, "created_by": actor}
-        asset = {"id": asset_id, "name": asset_id, "asset_type": asset_type,
-                 "status": "declared", "created_by": actor, "updated_at": None}
+        payload = {"id": asset_id, "asset_type": asset_type, "created_by": created_by,
+                   "origin": origin}
+        record = self._blank_record(asset_id, asset_type, created_by)
         def patch(rep):
-            _replica.upsert_asset(rep, asset)
-            return asset
+            _replica.upsert_asset(rep, record)
+            return record
         def apply_central():
-            result = self._central.declare(asset_type, actor, asset_id=asset_id)
+            result = self._central.declare(asset_type, created_by, origin=origin, asset_id=asset_id)
             if isinstance(result, str):
                 return {"id": result, "asset_type": asset_type}
             return result
@@ -300,11 +314,13 @@ class HybridClient:
         payload = {"asset_id": asset_id, "location_uri": location_uri,
                    "tool": tool, "revision": revision, "published_by": published_by}
         def patch(rep):
-            asset = _replica.get_asset(rep, asset_id) or {"id": asset_id, "name": asset_id,
-                                                          "asset_type": "unknown"}
-            asset["source"] = {"location_uri": location_uri, "tool": tool, "revision": revision}
-            _replica.upsert_asset(rep, asset)
-            return asset
+            record = _replica.get_asset(rep, asset_id) or self._blank_record(asset_id)
+            record["source"] = {"location_uri": location_uri, "tool": tool,
+                                "revision": revision, "version_num": None, "is_latest": True,
+                                "published_by": published_by,
+                                "published_at": datetime.now(timezone.utc).isoformat()}
+            _replica.upsert_asset(rep, record)
+            return record
         return self._write("bind_source", payload, asset_id,
                            lambda: self._central.bind_source(asset_id, location_uri, tool, revision, published_by),
                            patch)
@@ -324,23 +340,32 @@ class HybridClient:
     def rename(self, asset_id: str, new_name: str, actor: str) -> dict:
         payload = {"asset_id": asset_id, "new_name": new_name, "actor": actor}
         def patch(rep):
-            asset = _replica.get_asset(rep, asset_id)
-            if asset:
-                asset["name"] = new_name
-                _replica.upsert_asset(rep, asset)
+            record = _replica.get_asset(rep, asset_id)
+            if record:
+                record.setdefault("identity", {})["display_name"] = new_name
+                _replica.upsert_asset(rep, record)
             return payload
         return self._write("rename", payload, asset_id,
                            lambda: self._central.rename(asset_id, new_name, actor), patch)
+
+    @staticmethod
+    def _patch_location(record: dict, facet: str, new_location_uri: str) -> None:
+        key = "runtime" if facet == "runtime" else "source"
+        facet_obj = record.get(key) or {}
+        facet_obj["location_uri"] = new_location_uri
+        record[key] = facet_obj
 
     def relocate(self, asset_id: str, new_location_uri: str, actor: str,
                  facet: str = "source", new_revision: str | None = None) -> dict:
         payload = {"asset_id": asset_id, "new_location_uri": new_location_uri, "actor": actor,
                    "facet": facet, "new_revision": new_revision}
         def patch(rep):
-            asset = _replica.get_asset(rep, asset_id)
-            if asset:
-                asset.setdefault("source", {})["location_uri"] = new_location_uri
-                _replica.upsert_asset(rep, asset)
+            record = _replica.get_asset(rep, asset_id)
+            if record:
+                self._patch_location(record, facet, new_location_uri)
+                if new_revision is not None and facet != "runtime":
+                    record["source"]["revision"] = new_revision
+                _replica.upsert_asset(rep, record)
             return payload
         return self._write("relocate", payload, asset_id,
                            lambda: self._central.relocate(asset_id, new_location_uri, actor,
@@ -351,10 +376,10 @@ class HybridClient:
         payload = {"moves": moves}
         def patch(rep):
             for m in moves:
-                asset = _replica.get_asset(rep, m["asset_id"])
-                if asset:
-                    asset.setdefault("source", {})["location_uri"] = m["new_location_uri"]
-                    _replica.upsert_asset(rep, asset)
+                record = _replica.get_asset(rep, m["asset_id"])
+                if record:
+                    self._patch_location(record, m.get("facet", "source"), m["new_location_uri"])
+                    _replica.upsert_asset(rep, record)
             return payload
         return self._write("bulk_relocate", payload, None,
                            lambda: self._central.bulk_relocate(moves), patch)

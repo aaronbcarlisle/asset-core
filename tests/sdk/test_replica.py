@@ -44,8 +44,11 @@ def test_hydrate_pulls_user_assets_and_dependency_closure(tmp_path):
     assert result["assets"] == 2      # a1 (authored) + a2 (dependency closure)
     assert result["relations"] == 1
     db = open_replica(pipeline.local_cache)
-    assert get_asset(db, "a1")["name"] == "hero"
-    assert get_asset(db, "a2")["name"] == "hero_rig"   # pulled via closure, not assignment
+    # records are stored in the central resolve() shape (name lives under identity)
+    assert get_asset(db, "a1")["identity"]["display_name"] == "hero"
+    assert get_asset(db, "a2")["identity"]["display_name"] == "hero_rig"  # via closure
+    # the extracted `name` column tracks identity.display_name for cheap listing
+    assert db.execute("SELECT name FROM assets WHERE id='a1'").fetchone()[0] == "hero"
     meta = db.execute("SELECT value FROM meta WHERE key='hydrated_at'").fetchone()
     assert meta[0] == NOW
 

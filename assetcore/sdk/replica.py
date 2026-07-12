@@ -15,9 +15,10 @@ _SCHEMA = """
 CREATE TABLE IF NOT EXISTS assets (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    asset_type TEXT NOT NULL,
+    asset_type TEXT,
     status TEXT,
     created_by TEXT,
+    taxonomy TEXT,
     updated_at TEXT,
     payload_json TEXT NOT NULL
 );
@@ -41,15 +42,38 @@ def open_replica(path: str) -> sqlite3.Connection:
     return conn
 
 
+def _record_updated_at(record: dict) -> str | None:
+    """The 'last touched' timestamp for incremental hydrate, mirroring the central
+    service's list_assets `updated_since` math: max of created_at, the latest
+    source's published_at, and the latest runtime's cooked_at."""
+    stamps = [record.get("created_at")]
+    src = record.get("source") or {}
+    stamps.append(src.get("published_at"))
+    rt = record.get("runtime") or {}
+    stamps.append(rt.get("cooked_at"))
+    present = [s for s in stamps if s]
+    return max(present) if present else None
+
+
 def upsert_asset(conn: sqlite3.Connection, asset: dict) -> None:
+    """Store a resolve-shaped record. The full record rides in payload_json (so the
+    local reader can serve the exact central shapes); the filterable fields
+    (created_by, taxonomy, updated_at) are extracted into columns."""
+    identity = asset.get("identity") or {}
+    meta = asset.get("meta") or {}
+    name = identity.get("display_name") or asset.get("name") or asset["id"]
+    asset_type = asset.get("asset_type") or meta.get("asset_type")
+    status = identity.get("status") if identity else asset.get("status")
+    created_by = asset.get("created_by") or meta.get("created_by")
+    taxonomy = identity.get("taxonomy")
+    updated_at = asset.get("updated_at") or _record_updated_at(asset)
     conn.execute(
-        "INSERT INTO assets (id, name, asset_type, status, created_by, updated_at, payload_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?) "
+        "INSERT INTO assets (id, name, asset_type, status, created_by, taxonomy, updated_at, payload_json) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(id) DO UPDATE SET name=excluded.name, asset_type=excluded.asset_type, "
-        "status=excluded.status, created_by=excluded.created_by, "
+        "status=excluded.status, created_by=excluded.created_by, taxonomy=excluded.taxonomy, "
         "updated_at=excluded.updated_at, payload_json=excluded.payload_json",
-        (asset["id"], asset.get("name", asset["id"]), asset.get("asset_type"), asset.get("status"),
-         asset.get("created_by"), asset.get("updated_at"), json.dumps(asset)),
+        (asset["id"], name, asset_type, status, created_by, taxonomy, updated_at, json.dumps(asset)),
     )
 
 
@@ -106,11 +130,23 @@ def hydrate_cache(pipeline: PipelineConfig, ctx: HubContext, client, now_iso: st
         resolved = client.resolve(aid)
         if resolved is None:
             continue
-        # flatten resolve response + seed fields for replica storage
-        row = {**seeds.get(aid, {})}
-        row.update({"id": aid, "name": (resolved.get("identity") or {}).get("display_name") or aid,
-                    "asset_type": (resolved.get("meta") or {}).get("asset_type")})
-        upsert_asset(conn, row)
+        # Build the record the local reader serves: the central resolve() shape
+        # (id/meta/identity/source/runtime), enriched with created_at from the
+        # list summary (resolve's meta carries no created_at). This is exactly what
+        # /resolve returns, and /assets is a projection of it — so local answers are
+        # shape-identical to central.
+        summary = seeds.get(aid, {})
+        record = {
+            "id": aid,
+            "asset_type": (resolved.get("meta") or {}).get("asset_type") or summary.get("asset_type"),
+            "created_by": (resolved.get("meta") or {}).get("created_by") or summary.get("created_by"),
+            "created_at": summary.get("created_at"),
+            "meta": resolved.get("meta"),
+            "identity": resolved.get("identity"),
+            "source": resolved.get("source"),
+            "runtime": resolved.get("runtime"),
+        }
+        upsert_asset(conn, record)
         assets += 1
         for dep in client.dependencies(aid):
             to_id = dep["asset_id"]

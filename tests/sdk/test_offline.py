@@ -202,7 +202,7 @@ class UpCentral:
     def __init__(self):
         self.calls = []
     def ping(self): return True
-    def declare(self, asset_type, actor, asset_id=None):
+    def declare(self, asset_type, created_by, origin=None, asset_id=None):
         self.calls.append(("declare", asset_type, asset_id))
         return {"id": asset_id, "asset_type": asset_type}
     def bind_source(self, asset_id, location_uri, tool, revision, actor):
@@ -212,19 +212,22 @@ class UpCentral:
 
 def test_offline_declare_queues_and_patches_replica(tmp_path):
     hc = HybridClient(_pipeline(tmp_path), central=DownCentral())
-    result = hc.declare("model", actor="jsmith")
+    result = hc.declare("model", "jsmith")
     asset_id = result["id"]
     uuid.UUID(asset_id)                              # client-minted UUID (spec §5.3)
     ob = open_outbox(str(tmp_path / "outbox.db"))
     assert pending_count(ob) == 1                    # queued for replay
     rep = open_replica(str(tmp_path / "assetcore.db"))
-    assert get_asset(rep, asset_id)["asset_type"] == "model"   # optimistic local patch
+    # optimistic local patch, stored in the central resolve() shape
+    record = get_asset(rep, asset_id)
+    assert record["asset_type"] == "model"
+    assert record["meta"]["lifecycle"] == "provisional"
 
 
 def test_online_declare_goes_to_central_with_client_id(tmp_path):
     central = UpCentral()
     hc = HybridClient(_pipeline(tmp_path), central=central)
-    result = hc.declare("model", actor="jsmith")
+    result = hc.declare("model", "jsmith")
     assert central.calls[0][0] == "declare"
     assert central.calls[0][2] == result["id"]       # client id passed through
     ob = open_outbox(str(tmp_path / "outbox.db"))
@@ -234,17 +237,19 @@ def test_online_declare_goes_to_central_with_client_id(tmp_path):
 def test_read_falls_back_to_central_when_local_down(tmp_path, monkeypatch):
     class CentralWithRead(UpCentral):
         def resolve(self, asset_id):
-            return {"asset": {"id": asset_id, "name": "x", "asset_type": "model"}, "dependencies": []}
+            # central ResolveResponse shape (id/meta/identity/source/runtime)
+            return {"id": asset_id, "meta": {"id": asset_id, "asset_type": "model"},
+                    "identity": None, "source": None, "runtime": None}
     hc = HybridClient(_pipeline(tmp_path), central=CentralWithRead(),
                       os_env={"ASSETCORE_LOCAL_URL": "http://127.0.0.1:1"})  # nothing listens
     out = hc.resolve("a1")
-    assert out["asset"]["id"] == "a1"
+    assert out["id"] == "a1"
 
 
 def test_health_reports_outbox_counts(tmp_path):
     hc = HybridClient(_pipeline(tmp_path), central=DownCentral(),
                       os_env={"ASSETCORE_LOCAL_URL": "http://127.0.0.1:1"})
-    hc.declare("model", actor="jsmith")
+    hc.declare("model", "jsmith")
     h = hc.health()
     assert h["central"] == "down" and h["local_reader"] == "down"
     assert h["outbox_pending"] == 1 and h["outbox_failed"] == 0

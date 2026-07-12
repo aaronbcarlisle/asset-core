@@ -281,6 +281,21 @@ against a *different* current revision is dispatched and lands as a new (monoton
 auditable) version — never silently dropped. (The earlier `>=` string comparison
 was doubly wrong: `"9" >= "10"` is `True`, and git shas have no order at all.)
 
+**Local reader shapes match central.** The replica stores each asset in the central
+`resolve()` shape (`id/meta/identity/source/runtime`); the local reader's
+`/resolve/{id}` returns exactly that plus an additive `dependencies` key, and
+`/assets` returns `AssetSummaryOut`-shaped records — so a `HybridClient` read gives
+the same shape whether the local reader or central answered it. The
+`taxonomy_prefix` / `updated_since` / `created_by` filters work because `taxonomy`
+and `updated_at` are extracted into real columns (they used to be nested-only, so
+those filters silently returned nothing). `hydrate_cache` builds these records from
+the central `list_assets` summary (for `created_at`) enriched with `resolve` (for
+`runtime`).
+
+> Compatibility note: the Studio UGS C# plugin consumes these local endpoints. The
+> `/resolve` and `/assets` response shapes changed to match central — check the
+> plugin's parsing when rolling this out (see the companion `ugs-dev` spec).
+
 ---
 
 ## 7. Extending: add a new DCC ("the weekend adapter")

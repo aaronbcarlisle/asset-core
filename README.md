@@ -84,7 +84,7 @@ companion `ugs-dev` repo (`docs/superpowers/specs/2026-07-11-ugs-assetcore-hub-d
 | Local replica | `%LOCALAPPDATA%/StudioUGS/cache/assetcore.db` — hydrated on UGS sync |
 | Local reader | `assetcore hub serve-local` on `127.0.0.1:8741` (identity `/health`) |
 | Outbox | `%LOCALAPPDATA%/StudioUGS/cache/outbox.db` — WAL sqlite queue when central is down |
-| `HybridClient` | Reads: local reader first, central fallback. Writes: central if up, else outbox + optimistic replica patch |
+| `HybridClient` | Reads: local reader first, central fallback (same response shape either way). Writes: central if up, else outbox + optimistic replica patch |
 
 Launch and UE editor start **never** require central. See spec §5.4 availability matrix.
 
